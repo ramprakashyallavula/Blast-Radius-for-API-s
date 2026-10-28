@@ -99,6 +99,45 @@ describe("Results", () => {
     expect(screen.getByText("1 call to endpoints not in this spec")).toBeTruthy();
   });
 
+  it("marks uncertain union changes and explains them", () => {
+    const union = change({
+      field: "last4",
+      message: "Response field `last4` was removed (in the `Card` branch)",
+      certain: false,
+      worst_impact: "may_break",
+      impacts: [{ consumer: "web", file: "pay.ts", line: 4, impact: "may_break", reason: "reads `last4`", code: "" }],
+    });
+    render(<Results result={{ ...RESULT, changes: [union, ...RESULT.changes] }} />);
+
+    const badges = screen.getAllByText("Uncertain");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].getAttribute("title")).toMatch(/oneOf\/anyOf/);
+    expect(screen.getByText(/1 uncertain change/)).toBeTruthy();
+  });
+
+  it("shows no uncertainty marks when every change is certain", () => {
+    render(<Results result={RESULT} />);
+
+    expect(screen.queryByText("Uncertain")).toBeNull();
+    expect(screen.queryByText(/uncertain change/)).toBeNull();
+  });
+
+  it("shows the full Markdown report", () => {
+    render(<Results result={{ ...RESULT, markdown: "## 💥 BlastRadius report\n\nfull text" }} />);
+
+    expect(screen.getByText("Full report (Markdown)")).toBeTruthy();
+    expect(document.querySelector("pre.report")?.textContent).toContain("full text");
+  });
+
+  it("uses the API's consumer groups as they are (they never overlap)", () => {
+    render(<Results result={RESULT} />);
+
+    const may = document.querySelector(".stat.warn") as HTMLElement;
+    const fine = document.querySelector(".stat.ok") as HTMLElement;
+    expect(within(may).getByText("web")).toBeTruthy();
+    expect(within(fine).getByText("shipping")).toBeTruthy();
+  });
+
   it("copies the PR comment", async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
