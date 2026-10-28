@@ -1,0 +1,26 @@
+description: >
+  Fields read through helper functions, request payloads built before the call or in
+  another function, and renamed destructuring. `legacy_flag` is removed from User and
+  creating a user now requires `locale`.
+
+base: base.yaml
+head: head.yaml
+consumers_dir: consumers
+
+breaks:
+  - consumer: mailer
+    location: users.py:11
+    endpoint: GET /users/{id}
+    field: legacy_flag
+    why: is_legacy() reads legacy_flag from fetch_user()'s result
+
+  - consumer: admin
+    location: admin.py:7
+    endpoint: POST /users
+    field: locale
+    why: invite() builds the payload without locale
+
+# Not breaks:
+#   signup/signup.ts:5 sends locale (the body is built on the line before the call)
+#   profile/profile.ts:6 only reads `name` (destructured as `{ data: user }`)
+#   mailer users.py: email_of() only reads `email`

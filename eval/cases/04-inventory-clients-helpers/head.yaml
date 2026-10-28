@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info: {title: Inventory, version: 2.0.0}
+servers:
+  - url: https://inventory.internal.example.com
+paths:
+  /items/{sku}:
+    parameters:
+      - {name: sku, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getItem
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sku, name, quantity, warehouse]
+                properties:
+                  sku: {type: string}
+                  name: {type: string}
+                  quantity: {type: integer}
+                  warehouse:
+                    type: object
+                    properties:
+                      id: {type: string}

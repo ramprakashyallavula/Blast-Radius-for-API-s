@@ -1,0 +1,41 @@
+openapi: 3.1.0
+info: {title: Payments, version: 2.0.0}
+paths:
+  /payments:
+    get:
+      operationId: listPayments
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [pending, settled]}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Payment'}}
+  /payments/{paymentId}:
+    parameters:
+      - {name: paymentId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getPayment
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payment'}
+components:
+  schemas:
+    Payment:
+      oneOf:
+        - $ref: '#/components/schemas/Card'
+        - $ref: '#/components/schemas/Bank'
+    Card:
+      type: object
+      required: [id, type, last4]
+      properties: {id: {type: integer}, type: {type: string}, last4: {type: string}, brand: {type: string}}
+    Bank:
+      type: object
+      required: [id, type, iban]
+      properties: {id: {type: integer}, type: {type: string}, iban: {type: string}}

@@ -83,6 +83,7 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src"]
+target-version = "py310"  # flags syntax newer than the oldest supported Python
 extend-exclude = ["examples", "eval/cases"]
 
 [tool.ruff.lint]

@@ -1,0 +1,49 @@
+description: >
+  Different clients and URL styles against one endpoint: async httpx, aiohttp-style
+  `async with`, the `ky` library (not supported), a generated client, a URL taken from a
+  config dict, a same-named field on an unrelated object, and a response stored on
+  `self` and read in another method. `stock` is renamed to `quantity` and
+  `warehouse.city` is removed.
+
+base: base.yaml
+head: head.yaml
+consumers_dir: consumers
+
+breaks:
+  - consumer: picker
+    location: picker.py:2
+    endpoint: GET /items/{sku}
+    field: stock
+    why: returns resp.json()["stock"]
+
+  - consumer: warehouse-sync
+    location: sync.py:5
+    endpoint: GET /items/{sku}
+    field: warehouse.city
+    why: returns item["warehouse"]["city"]
+
+  - consumer: storefront
+    location: item.ts:4
+    endpoint: GET /items/{sku}
+    field: stock
+    why: shows item.stock
+
+  - consumer: reporting
+    location: low_stock.py:4
+    endpoint: GET /items/{sku}
+    field: stock
+    why: compares item.stock (generated client, operationId getItem)
+
+  - consumer: labels
+    location: labels.py:9
+    endpoint: GET /items/{sku}
+    field: stock
+    why: prints data['stock']
+
+  - consumer: item-cache
+    location: cache.py:8
+    endpoint: GET /items/{sku}
+    field: warehouse.city
+    why: city() reads self.item["warehouse"]["city"]
+
+# Not a break: audit/audit.py reads `stock` from its own database row, not the response.
