@@ -13,7 +13,7 @@ is actually safe because no consumer uses what changed.
 
 - **CLI** for local use and CI: terminal, Markdown and JSON reports
 - **GitHub Action** that comments on pull requests and fails the check when a consumer will break
-- **Web playground** (FastAPI + React) to try it without installing anything
+- **Web playground** (FastAPI + React) to try it in a browser, run locally
 
 > **Status: beta.** The diff engine is well tested; consumer scanning is pattern-based
 > and has known limits (see [Accuracy](#accuracy) and [What it understands](#what-it-understands)).
@@ -179,8 +179,13 @@ cd web && npm install && npm run dev            # http://localhost:5173
 | `GET /demo` | A ready-made `/analyze` request: the Orders API demo |
 | `GET /health` | Liveness check |
 
-Everything runs in memory and nothing is stored; inputs have size limits and YAML aliases
-are rejected (to block "billion laughs" payloads).
+Everything runs in memory and nothing is stored. Request size, input sizes and the work per
+request are capped, YAML aliases are rejected (to block "billion laughs" payloads), and by
+default only the local dev frontend may call the API from a browser.
+
+The playground is meant for local use and demos; there's no hosted version. It has no
+authentication or rate limiting, so read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before
+exposing it to the internet.
 
 ## Commands
 

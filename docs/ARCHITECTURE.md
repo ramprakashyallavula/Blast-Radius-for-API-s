@@ -17,7 +17,7 @@ scanner.py ──► matcher.py ────────┘
 | [`matcher.py`](../src/blastradius/matcher.py) | `CallSite`s + `Operation`s → groups by operation | Right-aligned segment matching with base-URL prefixes allowed; the most specific template wins (`/orders/search` beats `/orders/{id}`). `op:` calls match by `operationId`. |
 | [`impact.py`](../src/blastradius/impact.py) | `Change` × `CallSite` → `will_break` / `may_break` / `unaffected` | Follows the variables holding the response; a field read only counts on those. Request changes check what's sent, including payloads built before the call. If anything can't be traced, the answer is `may_break`. |
 | [`report.py`](../src/blastradius/report.py) | `Analysis` → terminal, Markdown, JSON | Worst first; changes nobody uses are collapsed. |
-| [`cli.py`](../src/blastradius/cli.py), [`server.py`](../src/blastradius/server.py), [`action.yml`](../action.yml) | Front doors | Exit codes 0/1/2 drive CI. The API runs in memory with input limits. The Action fetches the base spec, clones consumer repos, and posts or updates one comment. |
+| [`cli.py`](../src/blastradius/cli.py), [`server.py`](../src/blastradius/server.py), [`action.yml`](../action.yml) | Front doors | Exit codes 0/1/2 drive CI. The API runs in memory, caps request size, input sizes and work per request, and is meant for local/demo use ([DEPLOYMENT.md](DEPLOYMENT.md)). The Action fetches the base spec, clones consumer repos, and posts or updates one comment. |
 
 ## Design decisions
 

@@ -402,9 +402,22 @@ class Analysis:
 _RANK = {Impact.WILL_BREAK: 0, Impact.MAY_BREAK: 1, Impact.UNAFFECTED: 2}
 
 
+class AnalysisTooLarge(ValueError):
+    """Raised when an analysis would need more checks than `max_checks` allows."""
+
+
 def analyze(
-    base: Spec, head: Spec, sites: Iterable[CallSite], consumers: Iterable[str] = ()
+    base: Spec,
+    head: Spec,
+    sites: Iterable[CallSite],
+    consumers: Iterable[str] = (),
+    max_checks: int | None = None,
 ) -> Analysis:
+    """Diff the specs and assess every breaking/warning change at every call to it.
+
+    The work is (changes × calls to each changed endpoint). `max_checks` bounds it,
+    for callers such as the web API that must not let one request run for minutes.
+    """
     sites = list(sites)
     changes = diff_specs(base, head)
 
@@ -414,12 +427,18 @@ def analyze(
         sites, base.operations().values(), base.base_path_segments | head.base_path_segments
     )
 
-    impacts = []
-    for change in changes:
-        if change.severity is Severity.SAFE:
-            continue
-        callers = matches.by_operation.get((change.method, normalize_path(change.path)), [])
-        impacts.append(ChangeImpact(change, [assess(change, site) for site in callers]))
+    def callers(change: Change) -> list[CallSite]:
+        return matches.by_operation.get((change.method, normalize_path(change.path)), [])
+
+    relevant = [c for c in changes if c.severity is not Severity.SAFE]
+    if max_checks is not None:
+        checks = sum(len(callers(c)) for c in relevant)
+        if checks > max_checks:
+            raise AnalysisTooLarge(
+                f"This would need {checks:,} checks (changes × calls to them); "
+                f"the limit is {max_checks:,}."
+            )
+    impacts = [ChangeImpact(c, [assess(c, site) for site in callers(c)]) for c in relevant]
 
     matched = {s for group in matches.by_operation.values() for s in group}
     return Analysis(
