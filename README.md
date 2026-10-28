@@ -1,5 +1,7 @@
 # BlastRadius
 
+[![CI](https://github.com/ramprakashyallavula/Blast-Radius-for-API-s/actions/workflows/ci.yml/badge.svg)](https://github.com/ramprakashyallavula/Blast-Radius-for-API-s/actions/workflows/ci.yml)
+
 **Predict which services an API change will break, before it ships.**
 
 BlastRadius compares two versions of an OpenAPI spec, finds the services that call
@@ -61,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: OWNER/blastradius@main
+      - uses: ramprakashyallavula/Blast-Radius-for-API-s@main
         with:
           spec: api/openapi.yaml
           consumers-dir: services          # consumers in this repo (monorepo)
