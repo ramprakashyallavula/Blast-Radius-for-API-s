@@ -77,7 +77,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Analyze impact" }));
 
-    expect(await screen.findByText(/1 consumer\(s\) will break: billing-service/)).toBeTruthy();
+    expect(await screen.findByText("💥 1 consumer will break")).toBeTruthy();
     expect(screen.getByText("invoices.py:11")).toBeTruthy();
     const body = JSON.parse((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body as string);
     expect(body.consumers[0].name).toBe("billing-service");
