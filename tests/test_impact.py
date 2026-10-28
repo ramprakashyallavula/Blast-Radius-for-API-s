@@ -107,9 +107,17 @@ def test_assess(kind, field, context, expected):
 
 
 def test_reasons_name_the_field():
-    result = assess(change(K.RESPONSE_FIELD_REMOVED, "items[].sku"), site('x = item["sku"]'))
+    code = 'r = requests.get(url)\nfor item in r.json()["items"]:\n    x = item["sku"]'
+
+    result = assess(change(K.RESPONSE_FIELD_REMOVED, "items[].sku"), site(code))
 
     assert result.reason == "reads `sku`, which was removed"
+
+
+def test_a_read_that_cant_be_tied_to_the_response_is_only_may_break():
+    result = assess(change(K.RESPONSE_FIELD_REMOVED, "items[].sku"), site('x = item["sku"]'))
+
+    assert result.impact is Impact.MAY_BREAK
 
 
 # --- the full demo ---------------------------------------------------------

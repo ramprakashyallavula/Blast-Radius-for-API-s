@@ -30,7 +30,7 @@ from .diff import diff_specs
 from .impact import analyze
 from .models import CallSite, Impact, Severity
 from .report import change_to_dict, print_analysis, print_changes, to_json, to_markdown
-from .scanner import scan_consumer
+from .scanner import OPERATION_PREFIX, scan_consumer
 from .spec import Spec, SpecError
 
 app = typer.Typer(
@@ -147,7 +147,8 @@ def scan(consumer: ConsumerOpt = None, consumers_dir: ConsumersDirOpt = None) ->
     dirs = _consumer_dirs(consumer, consumers_dir)
     if not dirs:
         raise _fail("give at least one --consumer or --consumers-dir")
-    sites = _scan(dirs)
+    # Generated-client calls (op:getOrder) are only meaningful next to a spec; see `check`.
+    sites = [s for s in _scan(dirs) if not s.url.startswith(OPERATION_PREFIX)]
     table = Table(header_style="bold", box=None, padding=(0, 2, 0, 0))
     for column in ("Consumer", "Location", "Method", "URL"):
         table.add_column(column)

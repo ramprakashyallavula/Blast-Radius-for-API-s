@@ -81,6 +81,12 @@ class CallSite:
     url: str  # normalized URL template, e.g. "/{}/orders/{}"
     snippet: str  # the source line, for reports
     context: str  # the call plus the code after it, used to see which fields it touches
+    # The code before the call in the same function (request payloads are often built there).
+    preamble: str = ""
+    function: str | None = None  # name of the function the call is in, if any
+    # If that function hands the response back to its callers: the code after each call
+    # to it in the same file, as (line, code). Used to follow fields read one level up.
+    callers: tuple[tuple[int, str], ...] = ()
 
     @property
     def location(self) -> str:

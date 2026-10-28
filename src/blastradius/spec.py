@@ -83,6 +83,7 @@ class Operation:
     params: dict[tuple[str, str], dict] = field(default_factory=dict)  # (in, name) -> parameter
     request_body: dict | None = None
     responses: dict[str, dict] = field(default_factory=dict)  # status code -> response
+    operation_id: str | None = None  # used to match generated-client calls like getOrder()
 
     @property
     def key(self) -> tuple[str, str]:
@@ -215,6 +216,7 @@ class Spec:
                         str(code): self.resolve(resp)
                         for code, resp in (raw.get("responses") or {}).items()
                     },
+                    operation_id=raw.get("operationId"),
                 )
                 ops[op.key] = op
         return ops

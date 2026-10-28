@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .models import CallSite
+from .scanner import OPERATION_PREFIX
 from .spec import Operation
 
 _BASE_SEGMENT = re.compile(r"\{\}|api|v\d+(?:\.\d+)?")
@@ -44,10 +45,12 @@ def match_call_sites(
     result = MatchResult()
     for site in sites:
         op = match_operation(site, operations, base_segments)
-        if op is None:
-            result.unmatched.append(site)
-        else:
+        if op is not None:
             result.by_operation.setdefault(op.key, []).append(site)
+        elif not site.url.startswith(OPERATION_PREFIX):
+            # Generated-client calls that match no operationId are just other method
+            # calls (client.close(), api.configure(), ...), not calls to unknown endpoints.
+            result.unmatched.append(site)
     return result
 
 
@@ -55,6 +58,12 @@ def match_operation(
     site: CallSite, operations: Iterable[Operation], base_segments: set[str] = frozenset()
 ) -> Operation | None:
     """The most specific operation this call could be hitting, or None."""
+    if site.url.startswith(OPERATION_PREFIX):
+        wanted = _normalize_name(site.url[len(OPERATION_PREFIX) :])
+        for op in operations:
+            if op.operation_id and _normalize_name(op.operation_id) == wanted:
+                return op
+        return None
     call = _segments(site.url)
     best, best_score = None, -1
     for op in operations:
@@ -73,6 +82,11 @@ def match_operation(
         if score is not None and score > best_score:
             best, best_score = op, score
     return best
+
+
+def _normalize_name(name: str) -> str:
+    """getOrder, get_order and GetOrder all name the same operation."""
+    return re.sub(r"[_\-]", "", name).lower()
 
 
 def _segments(url: str) -> list[str]:
