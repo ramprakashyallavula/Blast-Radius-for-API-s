@@ -13,7 +13,7 @@ is actually safe because no consumer uses what changed.
 
 - **CLI** for local use and CI: terminal, Markdown and JSON reports
 - **GitHub Action** that comments on pull requests and fails the check when a consumer will break
-- **Web playground** (FastAPI + React) to try it without installing anything
+- **Web playground** (FastAPI + React) to try it in a browser, run locally
 
 > **Status: beta.** The diff engine is well tested; consumer scanning is pattern-based
 > and has known limits (see [Accuracy](#accuracy) and [What it understands](#what-it-understands)).
@@ -35,8 +35,8 @@ blastradius check examples/orders-service/openapi.v1.yaml \
 ```
 ╭─ BlastRadius ────────────────────────────────────────────────────────────────────╮
 │ 💥 3 consumers will break: billing-service, shipping-service, web-frontend       │
-│ 11 breaking changes in the spec · 3 will break · 1 may break · 7 call sites in 3 │
-│ consumers                                                                        │
+│ 11 breaking changes in the spec · 3 will break · 0 more may break · 7 call sites │
+│ in 3 consumers                                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────╯
 
 BREAKING POST /orders
@@ -130,9 +130,10 @@ runs when [`examples/orders-service/openapi.yaml`](examples/orders-service/opena
 | Go | `swag`, `ogen`, or a hand-written spec |
 
 The diff handles `$ref`, `allOf`, nullable fields (including FastAPI's `Optional[X]`), real
-`oneOf`/`anyOf` unions, path/query/header/cookie parameters, every 2xx response and media
-types. The full list, and what's not supported yet (external `$ref` files, `discriminator`,
-`readOnly`/`writeOnly`, value constraints), is in [docs/SCHEMA_SUPPORT.md](docs/SCHEMA_SUPPORT.md).
+`oneOf`/`anyOf` unions (merged, and branch by branch when branches can be paired; union
+changes are always flagged as uncertain), path/query/header/cookie parameters, every 2xx
+response and every JSON media type. The full list, and what's not supported yet (external `$ref` files, `discriminator`,
+`readOnly`/`writeOnly`, value constraints, unions whose branches can't be paired), is in [docs/SCHEMA_SUPPORT.md](docs/SCHEMA_SUPPORT.md).
 
 **Consumers:** **Python** (`requests`, `httpx`, `aiohttp`-style sessions, client objects) and
 **JavaScript/TypeScript** (`fetch`, `axios`), plus generated API clients matched by
@@ -178,8 +179,13 @@ cd web && npm install && npm run dev            # http://localhost:5173
 | `GET /demo` | A ready-made `/analyze` request: the Orders API demo |
 | `GET /health` | Liveness check |
 
-Everything runs in memory and nothing is stored; inputs have size limits and YAML aliases
-are rejected (to block "billion laughs" payloads).
+Everything runs in memory and nothing is stored. Request size, input sizes and the work per
+request are capped, YAML aliases are rejected (to block "billion laughs" payloads), and by
+default only the local dev frontend may call the API from a browser.
+
+The playground is meant for local use and demos; there's no hosted version. It has no
+authentication or rate limiting, so read [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before
+exposing it to the internet.
 
 ## Commands
 
@@ -193,6 +199,12 @@ are rejected (to block "billion laughs" payloads).
 `check` options: `-c PATH` (a consumer, repeatable), `-C DIR` (each subfolder is a consumer),
 `-f table|markdown|json`, `-o FILE`, `--fail-on impacted|breaking|never`.
 Exit codes: `0` OK, `1` the `--fail-on` condition was met, `2` bad input.
+
+In reports, each consumer is counted once, under its worst result: `will_break` lists
+consumers with at least one call that will break, and `may_break` those with a call that
+may break and none that will (the terminal and Markdown say "N more may break"). Every
+change in the JSON has `certain: false` when it sits inside a `oneOf`/`anyOf` branch, so
+its impact is at most `may_break`.
 
 ## How it works
 

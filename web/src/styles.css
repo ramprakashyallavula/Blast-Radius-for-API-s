@@ -649,6 +649,19 @@ a {
   color: var(--ok);
 }
 
+.badge.uncertain {
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  cursor: help;
+}
+
+.snippet.report {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .empty-results {
   color: var(--muted);
   margin: 0;

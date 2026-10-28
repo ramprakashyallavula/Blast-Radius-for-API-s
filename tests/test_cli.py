@@ -76,6 +76,7 @@ def test_check_markdown_to_file(tmp_path):
     assert text.startswith("## 💥 BlastRadius report")
     assert "| `billing-service` | `billing/invoices.py:11` | 🔴 will break |" in text
     assert "<summary>8 more changes with no affected consumers" in text
+    assert "3 consumers will break · 0 more may break ·" in text
 
 
 def test_check_json():
@@ -87,6 +88,7 @@ def test_check_json():
     first = data["changes"][0]
     assert first["worst_impact"] == "will_break"
     assert first["impacts"][0]["impact"] == "will_break"
+    assert all(c["certain"] is True for c in data["changes"] + data["safe_changes"])
 
 
 # --- errors ----------------------------------------------------------------

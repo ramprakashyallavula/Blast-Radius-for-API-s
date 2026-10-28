@@ -62,7 +62,7 @@ def to_markdown(analysis: Analysis) -> str:
         "",
         (
             f"{_plural(len(analysis.breaking), 'breaking change')} in the spec · "
-            f"{_plural(len(will), 'consumer')} will break · {len(may)} may break · "
+            f"{_plural(len(will), 'consumer')} will break · {len(may)} more may break · "
             f"{_plural(len(analysis.sites), 'call site')} scanned in "
             f"{_plural(len(analysis.consumers), 'consumer')}"
         ),
@@ -76,7 +76,7 @@ def to_markdown(analysis: Analysis) -> str:
             continue
         c = ci.change
         out += [
-            f"### {_MD_SEVERITY[c.severity]} `{c.endpoint}`: {c.message}",
+            f"### {_MD_SEVERITY[c.severity]} `{c.endpoint}`: {c.message}{_md_uncertain(c)}",
             "",
             "| Consumer | Location | Impact | Why |",
             "|---|---|---|---|",
@@ -97,7 +97,10 @@ def to_markdown(analysis: Analysis) -> str:
             ),
             "",
         ]
-        out += [f"- {_MD_SEVERITY[c.severity]} `{c.endpoint}`: {c.message}" for c in quiet]
+        out += [
+            f"- {_MD_SEVERITY[c.severity]} `{c.endpoint}`: {c.message}{_md_uncertain(c)}"
+            for c in quiet
+        ]
         out += ["", "</details>", ""]
 
     if analysis.unmatched:
@@ -121,6 +124,10 @@ def to_markdown(analysis: Analysis) -> str:
     return "\n".join(out) + "\n"
 
 
+def _md_uncertain(c: Change) -> str:
+    return "" if c.certain else " _(uncertain: inside a oneOf/anyOf)_"
+
+
 # --- JSON (CI, dashboards) -------------------------------------------------
 
 
@@ -134,6 +141,9 @@ def change_to_dict(c: Change) -> dict:
         "message": c.message,
         "before": c.before,
         "after": c.after,
+        # False for changes inside a oneOf/anyOf branch: whether a consumer gets (or
+        # sends) that branch can't be known, so these are never more than "may break".
+        "certain": c.certain,
     }
 
 
@@ -222,7 +232,7 @@ def print_analysis(analysis: Analysis, console: Console) -> None:
         headline = Text.from_markup("[bold green]✅ No consumer is affected by this change.[/]")
     stats = Text(
         f"{_plural(len(analysis.breaking), 'breaking change')} in the spec · "
-        f"{len(will)} will break · {len(may)} may break · "
+        f"{len(will)} will break · {len(may)} more may break · "
         f"{_plural(len(analysis.sites), 'call site')} in "
         f"{_plural(len(analysis.consumers), 'consumer')}",
         style="dim",

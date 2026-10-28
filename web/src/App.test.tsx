@@ -28,6 +28,7 @@ const RESULT: AnalyzeResponse = {
       path: "/orders/{orderId}",
       field: "discount_code",
       message: "Response field `discount_code` was removed",
+      certain: true,
       worst_impact: "will_break",
       impacts: [
         {

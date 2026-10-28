@@ -158,6 +158,132 @@ def test_unchanged_nullability_is_not_reported():
     assert diff_specs(spec(get(same)), spec(get(same))) == []
 
 
+# --- union branches compared one to one ------------------------------------
+# The merged view hides a change in one branch while another branch still has
+# the field as before. Paired branches are compared too, always as uncertain.
+
+CARD = obj({"kind": STR, "last4": STR}, ["kind"])
+BANK = obj({"kind": STR, "last4": STR, "iban": STR}, ["kind"])
+
+
+def test_field_removed_from_one_branch_while_another_still_has_it():
+    changes = found(
+        spec(get({"oneOf": [CARD, BANK]})),
+        spec(get({"oneOf": [obj({"kind": STR}, ["kind"]), BANK]})),
+    )
+
+    change = changes[(K.RESPONSE_FIELD_REMOVED, "last4")]
+    assert change.certain is False
+    assert "branch 1" in change.message
+
+
+def test_field_becoming_optional_in_the_only_branch_that_required_it():
+    changes = found(
+        spec(get({"anyOf": [obj({"a": STR}, ["a"]), obj({"b": STR})]})),
+        spec(get({"anyOf": [obj({"a": STR}), obj({"b": STR})]})),
+    )
+
+    assert changes[(K.RESPONSE_FIELD_BECAME_OPTIONAL, "a")].certain is False
+
+
+def test_enum_change_in_one_branch_when_branches_define_it_differently():
+    def status(*values):
+        return {"type": "string", "enum": list(values)}
+
+    changes = found(
+        spec(post({"oneOf": [obj({"s": status("a", "b")}), obj({"s": status("a", "b", "c")})]})),
+        spec(post({"oneOf": [obj({"s": status("a")}), obj({"s": status("a", "b", "c")})]})),
+    )
+
+    change = changes[(K.REQUEST_ENUM_VALUE_REMOVED, "s")]
+    assert change.severity is S.BREAKING
+    assert change.certain is False
+
+
+def test_new_required_field_in_one_request_branch():
+    changes = found(
+        spec(post({"oneOf": [CARD, BANK]})),
+        spec(
+            post({"oneOf": [obj({"kind": STR, "last4": STR, "cvc": STR}, ["kind", "cvc"]), BANK]})
+        ),
+    )
+
+    change = changes[(K.REQUEST_FIELD_ADDED_REQUIRED, "cvc")]
+    assert change.certain is False
+
+
+def test_branches_are_paired_by_ref_name_not_position():
+    schemas = {"Card": CARD, "Bank": BANK}
+    ref = {
+        "Card": {"$ref": "#/components/schemas/Card"},
+        "Bank": {"$ref": "#/components/schemas/Bank"},
+    }
+    changes = found(
+        spec(get({"oneOf": [ref["Card"], ref["Bank"]]}), schemas),
+        # Same branches, other order, and Card lost `last4`.
+        spec(
+            get({"oneOf": [ref["Bank"], ref["Card"]]}),
+            {**schemas, "Card": obj({"kind": STR}, ["kind"])},
+        ),
+    )
+
+    change = changes[(K.RESPONSE_FIELD_REMOVED, "last4")]
+    assert "the `Card` branch" in change.message
+    assert len(changes) == 1
+
+
+def test_a_named_branch_swapped_for_another_is_reported():
+    schemas = {"Card": CARD, "Bank": BANK, "Wallet": obj({"kind": STR})}
+
+    def union(*names):
+        return {"oneOf": [{"$ref": f"#/components/schemas/{n}"} for n in names]}
+
+    changes = found(
+        spec(post(union("Card", "Bank")), schemas), spec(post(union("Card", "Wallet")), schemas)
+    )
+
+    change = changes[(K.REQUEST_UNION_VARIANT_REMOVED, None)]
+    assert "`Bank`" in change.message
+    assert change.certain is False
+
+
+def test_branch_changes_in_a_nested_union_field():
+    def payment(card):
+        return obj({"id": STR, "method": {"oneOf": [card, BANK]}}, ["id", "method"])
+
+    changes = found(spec(get(payment(CARD))), spec(get(payment(obj({"kind": STR}, ["kind"])))))
+
+    assert changes[(K.RESPONSE_FIELD_REMOVED, "method.last4")].certain is False
+
+
+def test_merged_view_findings_are_not_repeated_per_branch():
+    changes = diff_specs(
+        spec(get({"anyOf": [CAT, DOG]})),
+        spec(get({"anyOf": [CAT, obj({"kind": STR, "barks": STR})]})),
+    )
+
+    assert [(c.kind, c.field) for c in changes] == [(K.RESPONSE_FIELD_TYPE_CHANGED, "barks")]
+
+
+def test_unpairable_branches_fall_back_to_the_merged_view():
+    changes = found(
+        spec(get({"oneOf": [CARD, BANK]})),
+        spec(get({"oneOf": [CARD, BANK, obj({"kind": STR}, ["kind"])]})),
+    )
+
+    assert set(changes) == {(K.RESPONSE_UNION_VARIANT_ADDED, None)}
+
+
+def test_branch_only_changes_never_say_will_break():
+    change = found(
+        spec(get({"oneOf": [CARD, BANK]})),
+        spec(get({"oneOf": [obj({"kind": STR}, ["kind"]), BANK]})),
+    )[(K.RESPONSE_FIELD_REMOVED, "last4")]
+
+    result = assess(change, site('pm = requests.get(URL).json()\nprint(pm["last4"])'))
+    assert result.impact is Impact.MAY_BREAK
+
+
 # --- path parameters --------------------------------------------------------
 
 
@@ -307,6 +433,63 @@ def test_media_type_impact():
 
     assert assess(removed_json, site("requests.post(url, json=body)")).impact is Impact.WILL_BREAK
     assert assess(removed_json, site("requests.post(url, files=f)")).impact is Impact.MAY_BREAK
+
+
+def test_every_json_media_type_is_compared_not_only_the_first():
+    content = {
+        "application/json": {"schema": obj({"id": STR})},
+        "application/vnd.api+json": {"schema": obj({"id": STR, "total": INT}, ["total"])},
+    }
+    changed = {**content, "application/vnd.api+json": {"schema": obj({"id": STR})}}
+    changes = found(
+        spec({"/x": {"get": {"responses": {"200": {"description": "ok", "content": content}}}}}),
+        spec({"/x": {"get": {"responses": {"200": {"description": "ok", "content": changed}}}}}),
+    )
+
+    change = changes[(K.RESPONSE_FIELD_REMOVED, "total")]
+    assert "application/vnd.api+json" in change.message
+    assert len(changes) == 1
+
+
+def test_reordering_json_media_types_is_not_a_change():
+    json, problem = {"schema": obj({"id": STR})}, {"schema": obj({"title": STR})}
+    before = {"application/json": json, "application/problem+json": problem}
+    after = {"application/problem+json": problem, "application/json": json}
+
+    def body(content):
+        return {
+            "/x": {
+                "post": {
+                    "requestBody": {"content": content},
+                    "responses": {"200": {"description": "ok", "content": content}},
+                }
+            }
+        }
+
+    assert diff_specs(spec(body(before)), spec(body(after))) == []
+
+
+def test_request_change_in_a_later_json_media_type_is_reported():
+    def body(merge_patch):
+        return {
+            "/x": {
+                "patch": {
+                    "requestBody": {
+                        "content": {
+                            "application/json": {"schema": obj({"name": STR})},
+                            "application/merge-patch+json": {"schema": merge_patch},
+                        }
+                    }
+                }
+            }
+        }
+
+    changes = found(
+        spec(body(obj({"name": STR}))), spec(body(obj({"name": STR, "etag": STR}, ["etag"])))
+    )
+
+    change = changes[(K.REQUEST_FIELD_ADDED_REQUIRED, "etag")]
+    assert "application/merge-patch+json" in change.message
 
 
 # --- nested $ref + allOf + nullable ----------------------------------------

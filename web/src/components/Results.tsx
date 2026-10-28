@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { AnalyzeResponse, ChangeImpact, Impact, ImpactLevel, Severity } from "../types";
+import type { AnalyzeResponse, Change, ChangeImpact, Impact, ImpactLevel, Severity } from "../types";
 import { InlineCode } from "./InlineCode";
 
 const IMPACT_LABEL: Record<ImpactLevel, string> = {
@@ -16,6 +16,10 @@ const SEVERITY_LABEL: Record<Severity, string> = {
 };
 
 const RANK: Record<ImpactLevel, number> = { will_break: 0, may_break: 1, unaffected: 2 };
+
+const UNCERTAIN_HELP =
+  "Inside a oneOf/anyOf branch: whether a consumer gets (or sends) that shape can't be known " +
+  "from the code, so this change is never reported as more than \"may break\".";
 
 type View = "change" | "consumer";
 type Filter = "affected" | "will_break" | "all";
@@ -40,10 +44,11 @@ export function Results({ result }: { result: AnalyzeResponse }) {
   }, [result, filter]);
 
   const quiet = result.changes.filter((c) => c.impacts.every((i) => i.impact === "unaffected"));
+  // The API lists each consumer once, under its worst result.
   const safeConsumers = summary.consumers.filter(
     (c) => !summary.will_break.includes(c) && !summary.may_break.includes(c),
   );
-  const mayOnly = summary.may_break.filter((c) => !summary.will_break.includes(c));
+  const uncertain = [...result.changes, ...result.safe_changes].filter((c) => !c.certain).length;
 
   return (
     <section className="results" aria-labelledby="results-title">
@@ -51,7 +56,7 @@ export function Results({ result }: { result: AnalyzeResponse }) {
 
       <div className="stat-grid">
         <Stat tone="danger" label="Will break" names={summary.will_break} />
-        <Stat tone="warn" label="May break" names={mayOnly} hint="needs a look" />
+        <Stat tone="warn" label="May break" names={summary.may_break} hint="needs a look" />
         <Stat tone="ok" label="Not affected" names={safeConsumers} />
       </div>
       <p className="muted small">
@@ -59,6 +64,7 @@ export function Results({ result }: { result: AnalyzeResponse }) {
         {plural(summary.call_sites, "call site")} found in {plural(summary.consumers.length, "consumer")}
         {summary.unmatched_call_sites > 0 &&
           ` · ${plural(summary.unmatched_call_sites, "call")} to endpoints not in the spec`}
+        {uncertain > 0 && ` · ${plural(uncertain, "uncertain change")} (inside a oneOf/anyOf)`}
       </p>
 
       <div className="toolbar">
@@ -108,7 +114,7 @@ export function Results({ result }: { result: AnalyzeResponse }) {
             <ul className="plain-list">
               {quiet.map((c, i) => (
                 <li key={i}>
-                  <SeverityBadge severity={c.severity} /> <code>{endpoint(c)}</code>{" "}
+                  <SeverityBadge severity={c.severity} /> <UncertainBadge change={c} /> <code>{endpoint(c)}</code>{" "}
                   <InlineCode text={c.message} />
                 </li>
               ))}
@@ -121,7 +127,7 @@ export function Results({ result }: { result: AnalyzeResponse }) {
             <ul className="plain-list">
               {result.safe_changes.map((c, i) => (
                 <li key={i}>
-                  <code>{endpoint(c)}</code> <InlineCode text={c.message} />
+                  <UncertainBadge change={c} /> <code>{endpoint(c)}</code> <InlineCode text={c.message} />
                 </li>
               ))}
             </ul>
@@ -142,6 +148,11 @@ export function Results({ result }: { result: AnalyzeResponse }) {
             </ul>
           </details>
         )}
+        <details>
+          <summary>Full report (Markdown)</summary>
+          <p className="muted small">The same report the GitHub Action posts on a pull request.</p>
+          <pre className="snippet report">{result.markdown}</pre>
+        </details>
       </div>
     </section>
   );
@@ -192,6 +203,7 @@ function ByChange({ changes }: { changes: ChangeImpact[] }) {
         <article key={i} className="card">
           <header className="card-header">
             <SeverityBadge severity={change.severity} />
+            <UncertainBadge change={change} />
             <code className="endpoint">{endpoint(change)}</code>
           </header>
           <p className="card-title">
@@ -236,7 +248,8 @@ function ByConsumer({ changes }: { changes: ChangeImpact[] }) {
                   impact={impact}
                   label={
                     <>
-                      <code>{endpoint(change)}</code> <InlineCode text={change.message} />
+                      <UncertainBadge change={change} /> <code>{endpoint(change)}</code>{" "}
+                      <InlineCode text={change.message} />
                     </>
                   }
                 />
@@ -266,6 +279,15 @@ function ImpactRow({ impact, label }: { impact: Impact; label: React.ReactNode }
 
 function ImpactBadge({ level }: { level: ImpactLevel }) {
   return <span className={`badge ${level}`}>{IMPACT_LABEL[level]}</span>;
+}
+
+function UncertainBadge({ change }: { change: Change }) {
+  if (change.certain) return null;
+  return (
+    <span className="badge uncertain" title={UNCERTAIN_HELP} aria-label={`Uncertain: ${UNCERTAIN_HELP}`}>
+      Uncertain
+    </span>
+  );
 }
 
 function SeverityBadge({ severity }: { severity: Severity }) {
