@@ -232,13 +232,22 @@ class Spec:
     # --- schemas ------------------------------------------------------------
 
     def json_schema(self, holder: dict | None) -> Any:
-        """The JSON schema inside a requestBody or response object, if any."""
+        """The schema of the first JSON media type in a requestBody or response, if any."""
+        return next(iter(self.json_schemas(holder).values()), None)
+
+    @staticmethod
+    def json_schemas(holder: dict | None) -> dict[str, Any]:
+        """Every JSON media type in a requestBody or response, with its schema.
+
+        Covers application/json and variants like application/problem+json. Keyed by
+        media type, so two versions are compared type by type whatever their order.
+        """
         content = (holder or {}).get("content") or {}
-        for media_type, media in content.items():
-            # Covers application/json and variants like application/problem+json.
-            if "json" in media_type and isinstance(media, dict):
-                return media.get("schema")
-        return None
+        return {
+            media_type: media.get("schema")
+            for media_type, media in content.items()
+            if "json" in media_type and isinstance(media, dict) and media.get("schema") is not None
+        }
 
     def request_schema(self, op: Operation) -> Any:
         return self.json_schema(op.request_body)
@@ -310,6 +319,42 @@ class Spec:
                 out.update(
                     self.flatten(sub, child, name in required_names, stack, children_in_union)
                 )
+        return out
+
+    def unions(self, schema: Any, prefix: str = "", _stack: tuple = ()) -> dict[str, list]:
+        """Every real anyOf/oneOf below `schema`: {field path: its non-null branches}.
+
+        Paths match `flatten`'s ("" for the schema itself), so a branch can be
+        flattened under the same prefix and compared with its counterpart.
+        """
+        out: dict[str, list] = {}
+        if not isinstance(schema, dict):
+            return out
+        if "$ref" in schema:
+            if schema["$ref"] in _stack:
+                return out
+            _stack = (*_stack, schema["$ref"])
+            schema = self.resolve(schema)
+            if not isinstance(schema, dict):
+                return out
+
+        def collect(sub: Any, path: str) -> None:
+            for key, value in self.unions(sub, path, _stack).items():
+                out.setdefault(key, value)
+
+        for part in schema.get("allOf") or []:
+            collect(part, prefix)
+        for key in ("anyOf", "oneOf"):
+            if isinstance(schema.get(key), list):
+                variants = [v for v in schema[key] if not _is_null_schema(v)]
+                if len(variants) > 1:
+                    out.setdefault(prefix, variants)
+                for variant in variants:
+                    collect(variant, prefix)
+        for name, sub in (schema.get("properties") or {}).items():
+            collect(sub, f"{prefix}.{name}" if prefix else name)
+        if schema.get("items") is not None:
+            collect(schema["items"], f"{prefix}[]")
         return out
 
     def union_variants(self, schema: Any) -> int | None:

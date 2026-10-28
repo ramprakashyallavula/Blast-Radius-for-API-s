@@ -130,9 +130,10 @@ runs when [`examples/orders-service/openapi.yaml`](examples/orders-service/opena
 | Go | `swag`, `ogen`, or a hand-written spec |
 
 The diff handles `$ref`, `allOf`, nullable fields (including FastAPI's `Optional[X]`), real
-`oneOf`/`anyOf` unions, path/query/header/cookie parameters, every 2xx response and media
-types. The full list, and what's not supported yet (external `$ref` files, `discriminator`,
-`readOnly`/`writeOnly`, value constraints), is in [docs/SCHEMA_SUPPORT.md](docs/SCHEMA_SUPPORT.md).
+`oneOf`/`anyOf` unions (merged, and branch by branch when branches can be paired; union
+changes are always flagged as uncertain), path/query/header/cookie parameters, every 2xx
+response and every JSON media type. The full list, and what's not supported yet (external `$ref` files, `discriminator`,
+`readOnly`/`writeOnly`, value constraints, unions whose branches can't be paired), is in [docs/SCHEMA_SUPPORT.md](docs/SCHEMA_SUPPORT.md).
 
 **Consumers:** **Python** (`requests`, `httpx`, `aiohttp`-style sessions, client objects) and
 **JavaScript/TypeScript** (`fetch`, `axios`), plus generated API clients matched by

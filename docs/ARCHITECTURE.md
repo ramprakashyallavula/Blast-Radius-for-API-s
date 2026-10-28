@@ -11,8 +11,8 @@ scanner.py ──► matcher.py ────────┘
 
 | Module | Input → output | Key ideas |
 |---|---|---|
-| [`spec.py`](../src/blastradius/spec.py) | YAML/JSON → `Spec`, `Operation`s, flattened fields | Resolves local `$ref` (with cycle detection), merges `allOf`, turns `X or null` into a nullable `X`, and represents a real `oneOf`/`anyOf` as the superset of its branches with every field below it marked `in_union`. Schemas become `{"items[].sku": FieldInfo(type, required, enum, nullable, ...)}` so two versions can be compared as dictionaries. |
-| [`diff.py`](../src/blastradius/diff.py) | two `Spec`s → `Change`s | Requests may loosen but not tighten; responses may grow but not shrink. Path parameters are compared by position (renames are free). Every 2xx response is compared. Changes inside a union are marked `certain=False`. |
+| [`spec.py`](../src/blastradius/spec.py) | YAML/JSON → `Spec`, `Operation`s, flattened fields | Resolves local `$ref` (with cycle detection), merges `allOf`, turns `X or null` into a nullable `X`, and represents a real `oneOf`/`anyOf` as the superset of its branches with every field below it marked `in_union`; `unions()` lists each union's raw branches for one-to-one comparison. Schemas become `{"items[].sku": FieldInfo(type, required, enum, nullable, ...)}` so two versions can be compared as dictionaries. |
+| [`diff.py`](../src/blastradius/diff.py) | two `Spec`s → `Change`s | Requests may loosen but not tighten; responses may grow but not shrink. Path parameters are compared by position (renames are free). Every 2xx response and every JSON media type (matched by name) is compared. Union branches that can be paired are also compared one to one. Changes inside a union are marked `certain=False`. |
 | [`scanner.py`](../src/blastradius/scanner.py) | source files → `CallSite`s | Regex plus a small tokenizer, for Python and JS/TS. Comments and strings are masked out first. URLs become templates (`/{}/orders/{}`) from literals, variables or helper calls. Each call keeps the code before and after it in its function, and the code after each call to that function in the same file. Generated-client calls are recorded as `op:<method>`. |
 | [`matcher.py`](../src/blastradius/matcher.py) | `CallSite`s + `Operation`s → groups by operation | Right-aligned segment matching with base-URL prefixes allowed; the most specific template wins (`/orders/search` beats `/orders/{id}`). `op:` calls match by `operationId`. |
 | [`impact.py`](../src/blastradius/impact.py) | `Change` × `CallSite` → `will_break` / `may_break` / `unaffected` | Follows the variables holding the response; a field read only counts on those. Request changes check what's sent, including payloads built before the call. If anything can't be traced, the answer is `may_break`. |
@@ -31,9 +31,11 @@ scanner.py ──► matcher.py ────────┘
    The default `--fail-on impacted` only fails on `will_break`.
 4. **Read vs. send.** Response changes matter to code that reads a field; request changes
    matter to code that sends one (or must now send one).
-5. **Superset view of unions.** Comparing union branches one to one needs a discriminator
-   most specs don't have. Merging branches catches removed and changed fields while
-   flagging that the consumer impact is uncertain.
+5. **Superset view of unions, plus paired branches.** Knowing which branch a payload
+   uses needs a discriminator most specs don't have, so the tool doesn't try. Merging
+   branches catches fields removed or changed everywhere; pairing branches by `$ref`
+   name, `title` or position catches a change in one branch that another branch hides.
+   Either way the impact is flagged as uncertain (`may_break` at most).
 
 ## Known limitations
 

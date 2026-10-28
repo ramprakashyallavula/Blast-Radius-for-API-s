@@ -227,59 +227,75 @@ class _OperationDiff:
                     before=media,
                 )
 
-        old_schema = self.base.request_schema(self.old)
-        new_schema = self.head.request_schema(self.new)
-        if old_schema is None or new_schema is None:
-            return  # no JSON body before, or JSON is no longer accepted (reported above)
+        # Compare each JSON media type with the same one in the new version. One that
+        # disappeared is reported above; one that's new can't break existing clients.
+        old_schemas = Spec.json_schemas(old_body)
+        new_schemas = Spec.json_schemas(new_body)
+        labelled = len(set(old_schemas) | set(new_schemas)) > 1
+        for media, old_schema in old_schemas.items():
+            if media in new_schemas:
+                self._request_body(
+                    old_schema, new_schemas[media], f" (`{media}`)" if labelled else ""
+                )
 
+    def _request_body(self, old_schema, new_schema, where: str):
         old_variants = self.base.union_variants(old_schema)
         new_variants = self.head.union_variants(new_schema)
         if old_variants and (new_variants or 1) < old_variants:
             self._add(
                 K.REQUEST_UNION_VARIANT_REMOVED,
                 S.BREAKING,
-                "Request body accepts fewer shapes "
+                f"Request body{where} accepts fewer shapes "
                 f"(oneOf/anyOf: {old_variants} → {new_variants or 1})",
                 certain=False,
             )
 
         old = self.base.flatten(old_schema)
         new = self.head.flatten(new_schema)
+        self._request_fields(old, new, where)
+        self._union_branches(old_schema, new_schema, new, where, request=True)
+
+    def _request_fields(self, old, new, where, branch=None, context=None):
+        """Request field rules. With `branch`, `old` and `new` are one union branch:
+        everything found is uncertain, and safe changes aren't repeated."""
+        note = f" (in {branch})" if branch else ""
+        context = context or new  # decides whether a new required field's parents are sent
 
         for path in _topmost(set(new) - set(old)):
-            if _effectively_required(path, new):
+            if _effectively_required(path, context):
                 self._add(
                     K.REQUEST_FIELD_ADDED_REQUIRED,
                     S.BREAKING,
-                    f"New required request field `{path}`",
+                    f"New required request{where} field `{path}`{note}",
                     path,
+                    certain=branch is None,
                 )
-            else:
+            elif branch is None:
                 self._add(
                     K.REQUEST_FIELD_ADDED_OPTIONAL,
                     S.SAFE,
-                    f"New optional request field `{path}`",
+                    f"New optional request{where} field `{path}`",
                     path,
                 )
 
         for path in sorted(set(old) & set(new)):
             o, n = old[path], new[path]
-            certain = not (o.in_union or n.in_union)
+            certain = branch is None and not (o.in_union or n.in_union)
             if o.type != n.type:
                 self._add(
                     K.REQUEST_FIELD_TYPE_CHANGED,
                     S.BREAKING,
-                    f"Request field `{path}` changed type `{o.type}` → `{n.type}`",
+                    f"Request{where} field `{path}` changed type `{o.type}` → `{n.type}`{note}",
                     path,
                     o.type,
                     n.type,
                     certain=certain,
                 )
-            if n.required and not o.required and _effectively_required(path, new):
+            if n.required and not o.required and _effectively_required(path, context):
                 self._add(
                     K.REQUEST_FIELD_BECAME_REQUIRED,
                     S.BREAKING,
-                    f"Request field `{path}` is now required",
+                    f"Request{where} field `{path}` is now required{note}",
                     path,
                     certain=certain,
                 )
@@ -288,7 +304,7 @@ class _OperationDiff:
                 self._add(
                     K.REQUEST_ENUM_VALUE_REMOVED,
                     S.BREAKING,
-                    f"Request field `{path}` {restriction}",
+                    f"Request{where} field `{path}` {restriction}{note}",
                     path,
                     certain=certain,
                 )
@@ -296,7 +312,7 @@ class _OperationDiff:
                 self._add(
                     K.REQUEST_FIELD_NO_LONGER_NULLABLE,
                     S.BREAKING,
-                    f"Request field `{path}` no longer accepts null",
+                    f"Request{where} field `{path}` no longer accepts null{note}",
                     path,
                     certain=certain,
                 )
@@ -304,8 +320,8 @@ class _OperationDiff:
                 self._add(
                     K.REQUEST_UNION_VARIANT_REMOVED,
                     S.BREAKING,
-                    f"Request field `{path}` accepts fewer shapes "
-                    f"(oneOf/anyOf: {o.variants} → {n.variants or 1})",
+                    f"Request{where} field `{path}` accepts fewer shapes "
+                    f"(oneOf/anyOf: {o.variants} → {n.variants or 1}){note}",
                     path,
                     certain=False,
                 )
@@ -314,9 +330,10 @@ class _OperationDiff:
             self._add(
                 K.REQUEST_FIELD_REMOVED,
                 S.WARNING,
-                f"Request field `{path}` was removed (clients still sending it may be rejected)",
+                f"Request{where} field `{path}` was removed{note} "
+                "(clients still sending it may be rejected)",
                 path,
-                certain=not old[path].in_union,
+                certain=branch is None and not old[path].in_union,
             )
 
     # --- response: may add, must not take away -----------------------------
@@ -358,11 +375,16 @@ class _OperationDiff:
                 before=media,
             )
 
-        old_schema = self.base.json_schema(old_response)
-        new_schema = self.head.json_schema(new_response)
-        if old_schema is None or new_schema is None:
-            return
+        # Each JSON media type against the same one in the new version, whatever the order.
+        old_schemas = Spec.json_schemas(old_response)
+        new_schemas = Spec.json_schemas(new_response)
+        labelled = len(set(old_schemas) | set(new_schemas)) > 1
+        for media, old_schema in old_schemas.items():
+            if media in new_schemas:
+                label = f"{where} (`{media}`)" if labelled else where
+                self._response_schema(old_schema, new_schemas[media], label)
 
+    def _response_schema(self, old_schema, new_schema, where: str):
         old_variants = self.base.union_variants(old_schema)
         new_variants = self.head.union_variants(new_schema)
         if (new_variants or 1) > (old_variants or 1):
@@ -376,24 +398,30 @@ class _OperationDiff:
 
         old = self.base.flatten(old_schema)
         new = self.head.flatten(new_schema)
+        self._response_fields(old, new, where)
+        self._union_branches(old_schema, new_schema, new, where, request=False)
+
+    def _response_fields(self, old, new, where, branch=None, context=None):
+        """Response field rules; see _request_fields for what `branch` changes."""
+        note = f" (in {branch})" if branch else ""
 
         for path in _topmost(set(old) - set(new)):
             self._add(
                 K.RESPONSE_FIELD_REMOVED,
                 S.BREAKING,
-                f"Response{where} field `{path}` was removed",
+                f"Response{where} field `{path}` was removed{note}",
                 path,
-                certain=not old[path].in_union,
+                certain=branch is None and not old[path].in_union,
             )
 
         for path in sorted(set(old) & set(new)):
             o, n = old[path], new[path]
-            certain = not (o.in_union or n.in_union)
+            certain = branch is None and not (o.in_union or n.in_union)
             if o.type != n.type:
                 self._add(
                     K.RESPONSE_FIELD_TYPE_CHANGED,
                     S.BREAKING,
-                    f"Response{where} field `{path}` changed type `{o.type}` → `{n.type}`",
+                    f"Response{where} field `{path}` changed type `{o.type}` → `{n.type}`{note}",
                     path,
                     o.type,
                     n.type,
@@ -403,7 +431,8 @@ class _OperationDiff:
                 self._add(
                     K.RESPONSE_FIELD_BECAME_OPTIONAL,
                     S.WARNING,
-                    f"Response{where} field `{path}` is no longer guaranteed (may be missing)",
+                    f"Response{where} field `{path}` is no longer guaranteed "
+                    f"(may be missing){note}",
                     path,
                     certain=certain,
                 )
@@ -411,7 +440,7 @@ class _OperationDiff:
                 self._add(
                     K.RESPONSE_FIELD_BECAME_NULLABLE,
                     S.WARNING,
-                    f"Response{where} field `{path}` can now be null",
+                    f"Response{where} field `{path}` can now be null{note}",
                     path,
                     certain=certain,
                 )
@@ -421,7 +450,7 @@ class _OperationDiff:
                     self._add(
                         K.RESPONSE_ENUM_VALUE_ADDED,
                         S.WARNING,
-                        f"Response{where} field `{path}` can now return {_values(added)}",
+                        f"Response{where} field `{path}` can now return {_values(added)}{note}",
                         path,
                         after=added,
                         certain=certain,
@@ -431,10 +460,105 @@ class _OperationDiff:
                     K.RESPONSE_UNION_VARIANT_ADDED,
                     S.WARNING,
                     f"Response{where} field `{path}` can now take more shapes "
-                    f"(oneOf/anyOf: {o.variants or 1} → {n.variants})",
+                    f"(oneOf/anyOf: {o.variants or 1} → {n.variants}){note}",
                     path,
                     certain=False,
                 )
 
-        for path in _topmost(set(new) - set(old)):
-            self._add(K.RESPONSE_FIELD_ADDED, S.SAFE, f"New response{where} field `{path}`", path)
+        if branch is None:
+            for path in _topmost(set(new) - set(old)):
+                self._add(
+                    K.RESPONSE_FIELD_ADDED, S.SAFE, f"New response{where} field `{path}`", path
+                )
+
+    # --- unions, branch by branch ------------------------------------------
+
+    def _union_branches(self, old_schema, new_schema, new_fields, where, request: bool):
+        """Compare paired oneOf/anyOf branches one to one.
+
+        The merged (superset) view hides a change in one branch when another branch
+        still has the field as before. Branches are paired by `$ref` name or `title`
+        when every branch has one, else by position when the counts match; otherwise
+        only the merged view applies. Everything found here is uncertain (which branch
+        a payload uses can't be known statically) and skipped if already reported.
+        """
+        compare = self._request_fields if request else self._response_fields
+        old_unions, new_unions = self.base.unions(old_schema), self.head.unions(new_schema)
+        reported = {(c.kind, c.field) for c in self.changes}
+
+        for prefix in sorted(set(old_unions) & set(new_unions)):
+            pairs, removed, added = _pair_branches(old_unions[prefix], new_unions[prefix])
+            for label, old_branch, new_branch in pairs:
+                old = self.base.flatten(old_branch, prefix, _in_union=True)
+                new = self.head.flatten(new_branch, prefix, _in_union=True)
+                # Whether the union itself is sent depends on its parents, not the branch.
+                context = {**new, **{a: new_fields[a] for a in _ancestors(prefix, new_fields)}}
+                start = len(self.changes)
+                compare(old, new, where, branch=label, context=context)
+                found, self.changes[start:] = self.changes[start:], []
+                for change in found:
+                    if (change.kind, change.field) not in reported:
+                        reported.add((change.kind, change.field))
+                        self.changes.append(change)
+
+            at = f" field `{prefix}`" if prefix else ""
+            kind = K.REQUEST_UNION_VARIANT_REMOVED if request else K.RESPONSE_UNION_VARIANT_ADDED
+            if (kind, prefix or None) in reported:
+                continue  # the branch count already shows it
+            if request:
+                for name in removed:
+                    self._add(
+                        kind,
+                        S.BREAKING,
+                        f"Request{where}{at} no longer accepts the `{name}` shape",
+                        prefix or None,
+                        certain=False,
+                    )
+            else:
+                for name in added:
+                    self._add(
+                        kind,
+                        S.WARNING,
+                        f"Response{where}{at} can now be the `{name}` shape",
+                        prefix or None,
+                        certain=False,
+                    )
+
+
+def _ancestors(prefix: str, fields: dict[str, FieldInfo]) -> list[str]:
+    return [a for a in field_ancestors(prefix) if a in fields] if prefix else []
+
+
+def _branch_name(branch) -> str | None:
+    if isinstance(branch, dict):
+        if isinstance(branch.get("$ref"), str):
+            return branch["$ref"].rsplit("/", 1)[-1]
+        if isinstance(branch.get("title"), str):
+            return branch["title"]
+    return None
+
+
+def _pair_branches(old: list, new: list) -> tuple[list, list[str], list[str]]:
+    """(label, old branch, new branch) pairs, plus names of removed and added branches."""
+    old_names = [_branch_name(b) for b in old]
+    new_names = [_branch_name(b) for b in new]
+    named = all(old_names) and all(new_names)
+    if named and len(set(old_names)) == len(old) and len(set(new_names)) == len(new):
+        pairs = [
+            (f"the `{name}` branch", branch, new[new_names.index(name)])
+            for name, branch in zip(old_names, old, strict=True)
+            if name in new_names
+        ]
+        removed = [n for n in old_names if n not in new_names]
+        added = [n for n in new_names if n not in old_names]
+        return pairs, removed, added
+    if len(old) == len(new):
+        return (
+            [
+                (f"branch {i} of the oneOf/anyOf", o, n)
+                for i, (o, n) in enumerate(zip(old, new, strict=True), start=1)
+            ],
+            [],
+            [],
+        )
+    return [], [], []
