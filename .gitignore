@@ -14,3 +14,5 @@ node_modules/
 .env.local
 .env.*.local
 .claude/
+# iCloud Drive sync-conflict copies ("file 2.ts"); this repo lives in a synced folder.
+* 2.*
