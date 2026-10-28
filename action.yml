@@ -1,0 +1,77 @@
+name: BlastRadius
+description: Comment on pull requests with the services an API change will break, before it ships.
+author: Ram Prakash Yallavula
+branding:
+  icon: alert-triangle
+  color: red
+
+inputs:
+  spec:
+    description: Path to the OpenAPI spec in this repository.
+    required: true
+  consumers:
+    description: Consumer source folders in this repository, one per line.
+    required: false
+    default: ""
+  consumers-dir:
+    description: A folder in this repository whose subfolders are each a consumer.
+    required: false
+    default: ""
+  consumer-repos:
+    description: Other repositories to scan as consumers (owner/name), one per line.
+    required: false
+    default: ""
+  consumer-token:
+    description: >
+      Token with read access to consumer-repos. The default token can only read
+      public repositories and this one.
+    required: false
+    default: ""
+  fail-on:
+    description: When to fail the check. impacted (a consumer will break), breaking, or never.
+    required: false
+    default: impacted
+  comment:
+    description: Post the report as a pull-request comment (true/false).
+    required: false
+    default: "true"
+  github-token:
+    description: Token used to post the comment. Needs pull-requests write permission.
+    required: false
+    default: ${{ github.token }}
+  python-version:
+    description: Python version to run BlastRadius with.
+    required: false
+    default: "3.12"
+
+outputs:
+  exit-code:
+    description: 0 = OK, 1 = the fail-on condition was met, 2 = bad input.
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install BlastRadius
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+
+    - name: Check API changes
+      id: run
+      shell: bash
+      run: '"${{ github.action_path }}/scripts/github-action.sh"'
+      env:
+        SPEC: ${{ inputs.spec }}
+        CONSUMERS: ${{ inputs.consumers }}
+        CONSUMERS_DIR: ${{ inputs.consumers-dir }}
+        CONSUMER_REPOS: ${{ inputs.consumer-repos }}
+        CONSUMER_TOKEN: ${{ inputs.consumer-token }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        COMMENT: ${{ inputs.comment }}
+        BASE_REF: ${{ github.base_ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_TOKEN: ${{ inputs.github-token }}

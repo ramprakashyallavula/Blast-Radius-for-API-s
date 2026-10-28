@@ -1,0 +1,24 @@
+# Dogfooding: run this repository's own Action on pull requests that change the
+# example Orders API. Open a PR that edits examples/orders-service/openapi.yaml
+# (for example, copy openapi.v2.yaml over it) to see the comment appear.
+name: BlastRadius
+
+on:
+  pull_request:
+    paths:
+      - examples/orders-service/openapi.yaml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  blastradius:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        with:
+          spec: examples/orders-service/openapi.yaml
+          consumers-dir: examples/consumers

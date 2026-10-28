@@ -41,6 +41,50 @@ BREAKING GET /orders/{orderId}
 ✓ 8 more breaking/warning changes with no affected consumers
 ```
 
+## Use it on pull requests (GitHub Action)
+
+Add a workflow to the repository that owns the API. Every pull request that changes
+the spec gets a comment listing the consumers it breaks, and the check fails if
+one will.
+
+```yaml
+# .github/workflows/blastradius.yml
+name: BlastRadius
+on:
+  pull_request:
+    paths: ["api/openapi.yaml"]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  blastradius:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: OWNER/blastradius@main
+        with:
+          spec: api/openapi.yaml
+          consumers-dir: services          # consumers in this repo (monorepo)
+          consumer-repos: |                # and/or consumers in other repos
+            my-org/billing-service
+            my-org/web-frontend
+          consumer-token: ${{ secrets.CONSUMERS_READ_TOKEN }}
+```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `spec` | (required) | Path to the OpenAPI spec |
+| `consumers` | | Consumer folders in this repo, one per line |
+| `consumers-dir` | | A folder whose subfolders are each a consumer |
+| `consumer-repos` | | Other repositories to scan (`owner/name`), one per line |
+| `consumer-token` | `github-token` | Token that can read `consumer-repos` (needed for private repos) |
+| `fail-on` | `impacted` | `impacted`, `breaking`, or `never` |
+| `comment` | `true` | Post the report as a PR comment (updated on each push, not duplicated) |
+
+This repository uses its own Action: see
+[`.github/workflows/blastradius.yml`](.github/workflows/blastradius.yml), which runs
+when [`examples/orders-service/openapi.yaml`](examples/orders-service/openapi.yaml) changes.
+
 ## Commands
 
 | Command | What it does |
@@ -84,6 +128,16 @@ Known misses, all on the roadmap: URLs built by helper functions, JS destructuri
 (`const { field } = ...`), and fields read in a different function from the call.
 The evaluation set is small (9 labeled breaking call sites), so treat these as
 early numbers.
+
+## Roadmap
+
+- **Better scanning**: Python `ast` and tree-sitter parsers with data-flow tracking, to fix
+  the known misses above; support for generated API clients.
+- **Traffic-based discovery**: find consumers from API-gateway or OpenTelemetry logs.
+- **Dashboard**: a service and web UI showing which services depend on which endpoints and
+  fields, and how that changes over time.
+- **AI-drafted migrations**: open a pull request in each affected consumer with a proposed fix.
+- **More protocols**: GraphQL and gRPC through the same change model.
 
 ## Development setup
 
