@@ -137,8 +137,9 @@ def change_to_dict(c: Change) -> dict:
     }
 
 
-def to_json(analysis: Analysis) -> str:
-    data = {
+def to_dict(analysis: Analysis) -> dict:
+    """The full analysis as plain data: used for JSON output and by the web API."""
+    return {
         "version": __version__,
         "summary": {
             "breaking_changes": len(analysis.breaking),
@@ -169,8 +170,21 @@ def to_json(analysis: Analysis) -> str:
         "safe_changes": [
             change_to_dict(c) for c in analysis.changes if c.severity is Severity.SAFE
         ],
+        "unmatched": [
+            {
+                "consumer": s.consumer,
+                "file": s.file,
+                "line": s.line,
+                "method": s.method,
+                "url": s.url,
+            }
+            for s in analysis.unmatched
+        ],
     }
-    return json.dumps(data, indent=2) + "\n"
+
+
+def to_json(analysis: Analysis) -> str:
+    return json.dumps(to_dict(analysis), indent=2) + "\n"
 
 
 # --- Terminal --------------------------------------------------------------

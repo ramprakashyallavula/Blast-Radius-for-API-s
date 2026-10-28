@@ -131,6 +131,24 @@ Useful options for `check`:
 
 Exit codes: `0` OK, `1` the `--fail-on` condition was met, `2` bad input.
 
+## Web API
+
+The same engine as an HTTP API, used by the web playground:
+
+```bash
+pip install ".[server]"
+uvicorn blastradius.server:app        # interactive docs at http://127.0.0.1:8000/docs
+```
+
+| Endpoint | What it does |
+|---|---|
+| `POST /analyze` | Body: `base_spec`, `head_spec` (YAML/JSON text) and `consumers` (name + source files). Returns the report as JSON, plus Markdown. |
+| `GET /demo` | A ready-made `/analyze` request: the Orders API demo |
+| `GET /health` | Liveness check |
+
+Everything runs in memory and nothing is stored. Inputs have size limits, and YAML
+aliases are rejected to block "billion laughs" style payloads.
+
 ## How it works
 
 1. **Spec loader**: reads OpenAPI 3.x, resolves `$ref`, merges `allOf`, and flattens schemas into field paths like `items[].sku`.

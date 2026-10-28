@@ -100,12 +100,17 @@ class Spec:
             text = path.read_text(encoding="utf-8")
         except OSError as e:
             raise SpecError(f"could not read {path}: {e.strerror}") from e
+        return cls.from_text(text, str(path))
+
+    @classmethod
+    def from_text(cls, text: str, source: str = "<memory>") -> Spec:
+        """Parse a spec from YAML or JSON text."""
         try:
             # YAML is a superset of JSON, so one parser handles both formats.
             doc = yaml.safe_load(text)
         except yaml.YAMLError as e:
-            raise SpecError(f"{path} is not valid YAML/JSON: {e}") from e
-        return cls(doc, str(path))
+            raise SpecError(f"{source} is not valid YAML/JSON: {e}") from e
+        return cls(doc, source)
 
     @property
     def title(self) -> str:
