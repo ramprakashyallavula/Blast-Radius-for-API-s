@@ -10,3 +10,7 @@ build/
 .ruff_cache/
 .DS_Store
 blastradius-report.*
+node_modules/
+.env.local
+.env.*.local
+.claude/

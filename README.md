@@ -137,7 +137,7 @@ The same engine as an HTTP API, used by the web playground:
 
 ```bash
 pip install ".[server]"
-uvicorn blastradius.server:app        # interactive docs at http://127.0.0.1:8000/docs
+uvicorn blastradius.server:app --port 8787   # docs at http://127.0.0.1:8787/docs
 ```
 
 | Endpoint | What it does |
@@ -145,6 +145,12 @@ uvicorn blastradius.server:app        # interactive docs at http://127.0.0.1:800
 | `POST /analyze` | Body: `base_spec`, `head_spec` (YAML/JSON text) and `consumers` (name + source files). Returns the report as JSON, plus Markdown. |
 | `GET /demo` | A ready-made `/analyze` request: the Orders API demo |
 | `GET /health` | Liveness check |
+
+The web playground (React + TypeScript + Vite) lives in [`web/`](web):
+
+```bash
+cd web && npm install && npm run dev   # expects the API on port 8787 (see web/.env.example)
+```
 
 Everything runs in memory and nothing is stored. Inputs have size limits, and YAML
 aliases are rejected to block "billion laughs" style payloads.
