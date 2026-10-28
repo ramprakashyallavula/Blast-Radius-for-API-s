@@ -112,8 +112,11 @@ class UnmatchedOut(BaseModel):
 class SummaryOut(BaseModel):
     breaking_changes: int
     consumers: list[str]
-    will_break: list[str]
-    may_break: list[str]
+    will_break: list[str] = Field(description="Consumers with at least one call that will break.")
+    may_break: list[str] = Field(
+        description="Consumers with a call that may break and none that will break. "
+        "The two lists never overlap."
+    )
     call_sites: int
     unmatched_call_sites: int
 

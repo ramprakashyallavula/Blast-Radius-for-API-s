@@ -62,7 +62,7 @@ def to_markdown(analysis: Analysis) -> str:
         "",
         (
             f"{_plural(len(analysis.breaking), 'breaking change')} in the spec · "
-            f"{_plural(len(will), 'consumer')} will break · {len(may)} may break · "
+            f"{_plural(len(will), 'consumer')} will break · {len(may)} more may break · "
             f"{_plural(len(analysis.sites), 'call site')} scanned in "
             f"{_plural(len(analysis.consumers), 'consumer')}"
         ),
@@ -232,7 +232,7 @@ def print_analysis(analysis: Analysis, console: Console) -> None:
         headline = Text.from_markup("[bold green]✅ No consumer is affected by this change.[/]")
     stats = Text(
         f"{_plural(len(analysis.breaking), 'breaking change')} in the spec · "
-        f"{len(will)} will break · {len(may)} may break · "
+        f"{len(will)} will break · {len(may)} more may break · "
         f"{_plural(len(analysis.sites), 'call site')} in "
         f"{_plural(len(analysis.consumers), 'consumer')}",
         style="dim",

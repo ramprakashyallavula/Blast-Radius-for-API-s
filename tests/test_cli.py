@@ -76,6 +76,7 @@ def test_check_markdown_to_file(tmp_path):
     assert text.startswith("## 💥 BlastRadius report")
     assert "| `billing-service` | `billing/invoices.py:11` | 🔴 will break |" in text
     assert "<summary>8 more changes with no affected consumers" in text
+    assert "3 consumers will break · 0 more may break ·" in text
 
 
 def test_check_json():

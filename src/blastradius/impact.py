@@ -389,9 +389,17 @@ class Analysis:
         return [c for c in self.changes if c.severity is Severity.BREAKING]
 
     def consumers_with(self, impact: Impact) -> list[str]:
-        return sorted(
-            {i.site.consumer for ci in self.impacts for i in ci.impacts if i.impact is impact}
-        )
+        """Consumers whose *worst* result is `impact`, so each consumer is in one group:
+        one that will break somewhere isn't also listed as "may break"."""
+        worst: dict[str, int] = {}
+        for ci in self.impacts:
+            for i in ci.impacts:
+                rank = _RANK[i.impact]
+                worst[i.site.consumer] = min(rank, worst.get(i.site.consumer, rank))
+        return sorted(c for c, rank in worst.items() if rank == _RANK[impact])
+
+
+_RANK = {Impact.WILL_BREAK: 0, Impact.MAY_BREAK: 1, Impact.UNAFFECTED: 2}
 
 
 def analyze(

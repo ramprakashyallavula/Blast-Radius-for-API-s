@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from blastradius.impact import analyze, assess, reads_field, sends_field
-from blastradius.models import CallSite, Change, Impact
+from blastradius.impact import Analysis, analyze, assess, reads_field, sends_field
+from blastradius.models import CallSite, Change, ChangeImpact, ConsumerImpact, Impact
 from blastradius.models import ChangeKind as K
 from blastradius.models import Severity as S
 from blastradius.scanner import scan_consumer
@@ -167,9 +167,39 @@ def test_demo_finds_exactly_the_real_breakages(demo):
 def test_demo_summary(demo):
     assert demo.consumers == ["billing-service", "shipping-service", "web-frontend"]
     assert demo.consumers_with(Impact.WILL_BREAK) == demo.consumers
-    assert demo.consumers_with(Impact.MAY_BREAK) == ["web-frontend"]
+    # web-frontend also has a "may break" call, but it's listed once, under its worst.
+    assert demo.consumers_with(Impact.MAY_BREAK) == []
     assert len(demo.breaking) == 11
     assert [s.url for s in demo.unmatched] == ["/{}/orders/{}/cancel"]
+
+
+def test_consumer_groups_never_overlap():
+    def site(consumer, line):
+        return CallSite(consumer, "a.py", line, "GET", "/x", "", "")
+
+    change = Change(K.RESPONSE_FIELD_REMOVED, S.BREAKING, "GET", "/x", "", "a")
+    analysis = Analysis(
+        changes=[change],
+        impacts=[
+            ChangeImpact(
+                change,
+                [
+                    ConsumerImpact(site("both", 1), Impact.WILL_BREAK, ""),
+                    ConsumerImpact(site("both", 2), Impact.MAY_BREAK, ""),
+                    ConsumerImpact(site("maybe", 1), Impact.MAY_BREAK, ""),
+                    ConsumerImpact(site("maybe", 2), Impact.UNAFFECTED, ""),
+                    ConsumerImpact(site("fine", 1), Impact.UNAFFECTED, ""),
+                ],
+            )
+        ],
+        consumers=["both", "fine", "maybe"],
+        sites=[],
+        unmatched=[],
+    )
+
+    assert analysis.consumers_with(Impact.WILL_BREAK) == ["both"]
+    assert analysis.consumers_with(Impact.MAY_BREAK) == ["maybe"]
+    assert analysis.consumers_with(Impact.UNAFFECTED) == ["fine"]
 
 
 def test_breaking_changes_nobody_uses_are_cleared(demo):

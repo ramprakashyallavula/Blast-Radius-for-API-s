@@ -35,8 +35,8 @@ blastradius check examples/orders-service/openapi.v1.yaml \
 ```
 ╭─ BlastRadius ────────────────────────────────────────────────────────────────────╮
 │ 💥 3 consumers will break: billing-service, shipping-service, web-frontend       │
-│ 11 breaking changes in the spec · 3 will break · 1 may break · 7 call sites in 3 │
-│ consumers                                                                        │
+│ 11 breaking changes in the spec · 3 will break · 0 more may break · 7 call sites │
+│ in 3 consumers                                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────╯
 
 BREAKING POST /orders
@@ -194,6 +194,12 @@ are rejected (to block "billion laughs" payloads).
 `check` options: `-c PATH` (a consumer, repeatable), `-C DIR` (each subfolder is a consumer),
 `-f table|markdown|json`, `-o FILE`, `--fail-on impacted|breaking|never`.
 Exit codes: `0` OK, `1` the `--fail-on` condition was met, `2` bad input.
+
+In reports, each consumer is counted once, under its worst result: `will_break` lists
+consumers with at least one call that will break, and `may_break` those with a call that
+may break and none that will (the terminal and Markdown say "N more may break"). Every
+change in the JSON has `certain: false` when it sits inside a `oneOf`/`anyOf` branch, so
+its impact is at most `may_break`.
 
 ## How it works
 
