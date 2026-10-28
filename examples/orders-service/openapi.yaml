@@ -1,10 +1,21 @@
 # The live version of the Orders API. Pull requests that change this file get a
 # BlastRadius comment (see .github/workflows/blastradius.yml). openapi.v1.yaml and
 # openapi.v2.yaml are fixed snapshots used by the tests and the README demo.
+# v2 of the Orders API: the "proposed change" in a pull request.
+# Compared to v1:
+#   - Order.discount_code removed            (breaking: clients may read it)
+#   - Order.total is now a string ("19.99")  (breaking: type change)
+#   - Order.customer_name replaced by a
+#     `customer` object                      (breaking: field removed; new field is safe)
+#   - OrderStatus gained `on_hold`           (warning: clients may not handle it)
+#   - NewOrder requires `currency`           (breaking: old clients don't send it)
+#   - /orders/{orderId}/tracking removed     (breaking: moved to the shipping service)
+#   - GET /orders has an optional `limit`    (safe)
+#   - POST /orders/{orderId}/refunds added   (safe)
 openapi: 3.0.3
 info:
   title: Orders Service
-  version: 1.0.0
+  version: 2.0.0
   description: Creates and tracks customer orders. Called by billing, shipping and the web frontend.
 servers:
   - url: https://orders.internal.example.com/v1
@@ -20,6 +31,11 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/OrderStatus'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
       responses:
         '200':
           description: A list of orders
@@ -66,50 +82,54 @@ paths:
         '404':
           description: Order not found
 
-  /orders/{orderId}/tracking:
+  /orders/{orderId}/refunds:
     parameters:
       - name: orderId
         in: path
         required: true
         schema:
           type: string
-    get:
-      operationId: getTracking
-      summary: Get shipment tracking for an order
+    post:
+      operationId: refundOrder
+      summary: Refund an order
       responses:
-        '200':
-          description: Tracking details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Tracking'
+        '202':
+          description: Refund accepted
 
 components:
   schemas:
     OrderStatus:
       type: string
-      enum: [pending, paid, shipped, cancelled]
+      enum: [pending, paid, on_hold, shipped, cancelled]
 
     Order:
       type: object
-      required: [id, status, total, customer_name]
+      required: [id, status, total, customer]
       properties:
         id:
           type: string
         status:
           $ref: '#/components/schemas/OrderStatus'
         total:
-          type: number
+          type: string
+          description: Decimal amount as a string, e.g. "19.99", to avoid float rounding.
         currency:
           type: string
-        discount_code:
-          type: string
-        customer_name:
-          type: string
+        customer:
+          $ref: '#/components/schemas/Customer'
         items:
           type: array
           items:
             $ref: '#/components/schemas/LineItem'
+
+    Customer:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
 
     LineItem:
       type: object
@@ -122,21 +142,13 @@ components:
 
     NewOrder:
       type: object
-      required: [customer_name, items]
+      required: [customer_name, items, currency]
       properties:
         customer_name:
+          type: string
+        currency:
           type: string
         items:
           type: array
           items:
             $ref: '#/components/schemas/LineItem'
-
-    Tracking:
-      type: object
-      properties:
-        carrier:
-          type: string
-        tracking_number:
-          type: string
-        address:
-          type: string
