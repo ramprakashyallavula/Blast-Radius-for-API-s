@@ -32,6 +32,12 @@ from .spec import Spec, normalize_path
 # function, so its fields may be used somewhere we didn't scan.
 _RETURNS_RESPONSE = re.compile(r"^\s*return\s+(?:await\s+)?[\w.]+(?:\(\))?\s*;?\s*$", re.MULTILINE)
 _SENDS_BODY = re.compile(r"\b(?:json|data|body|content)\s*[=:]")
+# Signs that the body is sent or the response is read as JSON.
+_SENDS_JSON = re.compile(r"\bjson\s*=|JSON\.stringify|\baxios\.(?:post|put|patch)\b")
+_READS_JSON = re.compile(r"\.json\(\)|\b(?:res|resp|response)\.data\b|\{\s*data\s*\}")
+_CHECKS_SUCCESS_CODE = re.compile(r"\b20\d\b")
+
+_UNCERTAIN_SUFFIX = " (inside a oneOf/anyOf branch, so it depends on which shape this call gets)"
 
 
 def reads_field(context: str, name: str) -> bool:
@@ -66,6 +72,11 @@ _ON_READ = {
         Impact.MAY_BREAK,
         "reads `{f}`; check it handles the new value(s)",
     ),
+    K.RESPONSE_FIELD_BECAME_NULLABLE: (Impact.MAY_BREAK, "reads `{f}`, which can now be null"),
+    K.RESPONSE_UNION_VARIANT_ADDED: (
+        Impact.MAY_BREAK,
+        "reads `{f}`, which can now take a shape this code may not expect",
+    ),
 }
 
 # Request changes where old code breaks if it does NOT send the field.
@@ -80,7 +91,10 @@ _MUST_SEND = {
 _ON_SEND = {
     K.PARAM_TYPE_CHANGED: "sends `{f}`; check the value matches the new type",
     K.REQUEST_FIELD_TYPE_CHANGED: "sends `{f}`; check the value matches the new type",
-    K.REQUEST_ENUM_VALUE_REMOVED: "sends `{f}`; check it never uses the removed value(s)",
+    K.REQUEST_ENUM_VALUE_REMOVED: "sends `{f}`; check it only uses the values still allowed",
+    K.PARAM_ENUM_RESTRICTED: "sends `{f}`; check it only uses the values still allowed",
+    K.REQUEST_FIELD_NO_LONGER_NULLABLE: "sends `{f}`; check it never sends null",
+    K.REQUEST_UNION_VARIANT_REMOVED: "sends `{f}`; check it doesn't use a shape that was removed",
     K.PARAM_REMOVED: "still sends `{f}`, which the API no longer declares",
     K.REQUEST_FIELD_REMOVED: "still sends `{f}`, which the API no longer declares",
 }
@@ -88,6 +102,14 @@ _ON_SEND = {
 
 def assess(change: Change, site: CallSite) -> ConsumerImpact:
     """How `change` affects the code at `site`."""
+    result = _assess(change, site)
+    if not change.certain and result.impact is Impact.WILL_BREAK:
+        # We know the code uses the field, but not that it ever sees the changed branch.
+        return ConsumerImpact(site, Impact.MAY_BREAK, result.reason + _UNCERTAIN_SUFFIX)
+    return result
+
+
+def _assess(change: Change, site: CallSite) -> ConsumerImpact:
     kind, ctx, f = change.kind, site.context, leaf_name(change.field)
 
     def result(impact: Impact, reason: str) -> ConsumerImpact:
@@ -95,6 +117,19 @@ def assess(change: Change, site: CallSite) -> ConsumerImpact:
 
     if kind is K.ENDPOINT_REMOVED:
         return result(Impact.WILL_BREAK, "calls this endpoint, which was removed")
+
+    if kind in (K.PATH_PARAM_TYPE_CHANGED, K.PATH_PARAM_ENUM_RESTRICTED):
+        return result(
+            Impact.MAY_BREAK, "puts `{f}` in the URL; check the value it sends is still valid"
+        )
+
+    if kind is K.RESPONSE_UNION_VARIANT_ADDED and not change.field:
+        return result(
+            Impact.MAY_BREAK, "the response can now take a shape this code may not expect"
+        )
+
+    if kind is K.REQUEST_UNION_VARIANT_REMOVED and not change.field:
+        return result(Impact.MAY_BREAK, "check the body it sends still matches an accepted shape")
 
     if kind in _ON_READ:
         impact, reason = _ON_READ[kind]
@@ -122,12 +157,38 @@ def assess(change: Change, site: CallSite) -> ConsumerImpact:
             return result(Impact.UNAFFECTED, "already sends a request body")
         return result(Impact.MAY_BREAK, "no request body detected, and one is now required")
 
+    if kind is K.REQUEST_MEDIA_TYPE_REMOVED:
+        if "json" in str(change.before) and _SENDS_JSON.search(ctx):
+            return result(Impact.WILL_BREAK, "sends JSON, which is no longer accepted")
+        return result(
+            Impact.MAY_BREAK, f"check how it encodes the body: `{change.before}` was removed"
+        )
+
+    if kind is K.RESPONSE_MEDIA_TYPE_REMOVED:
+        if "json" in str(change.before) and _READS_JSON.search(ctx):
+            return result(Impact.WILL_BREAK, "reads the response as JSON, which is no longer sent")
+        return result(
+            Impact.MAY_BREAK, f"check how it reads the response: `{change.before}` was removed"
+        )
+
     if kind is K.RESPONSE_STATUS_REMOVED:
         if str(change.before) in ctx:
             return result(Impact.MAY_BREAK, f"checks for status {change.before}, which was removed")
         return result(Impact.UNAFFECTED, "does not check for the removed status")
 
-    return result(Impact.UNAFFECTED, "not affected")
+    if kind is K.RESPONSE_STATUS_ADDED:
+        if _CHECKS_SUCCESS_CODE.search(ctx):
+            return result(
+                Impact.MAY_BREAK,
+                f"checks for specific status codes; it may not handle {change.after}",
+            )
+        return result(
+            Impact.MAY_BREAK,
+            f"couldn't tell whether it handles the new {change.after} response",
+        )
+
+    # No specific rule: say so instead of claiming the code is safe.
+    return result(Impact.MAY_BREAK, "no rule for this kind of change yet; please check by hand")
 
 
 # --- putting it together ---------------------------------------------------
