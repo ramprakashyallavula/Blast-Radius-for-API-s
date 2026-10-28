@@ -1,0 +1,36 @@
+description: >
+  Patterns that are hard for a pattern-based scanner, included on purpose so the
+  numbers show real limits. `legacy_sku` is removed from the Product response.
+
+base: base.yaml
+head: head.yaml
+consumers_dir: consumers
+
+breaks:
+  # The response is returned and the field is read in another function.
+  # Expected: "may break" (the tool can't trace it, and says so).
+  - consumer: catalog-sync
+    location: sync.py:7
+    endpoint: GET /products/{productId}
+    field: legacy_sku
+    why: sync_one() reads product["legacy_sku"] from fetch_product()'s result
+
+  # JS destructuring: `const { legacy_sku } = ...` isn't recognized as a read.
+  # Expected: missed (false negative).
+  - consumer: storefront
+    location: product.ts:4
+    endpoint: GET /products/{productId}
+    field: legacy_sku
+    why: legacy_sku.toUpperCase() throws on undefined
+
+  # The URL is built by a helper, so the call isn't found at all.
+  # Expected: missed (false negative).
+  - consumer: reports
+    location: client.py:14
+    endpoint: GET /products/{productId}
+    field: legacy_sku
+    why: reads resp.json()["legacy_sku"]
+
+# Not listed, so a flag here is a false positive:
+#   pricing/compare.py:7 reads `cached_row.legacy_sku`, a local database row with the same
+#   field name. Expected: wrongly flagged "will break".

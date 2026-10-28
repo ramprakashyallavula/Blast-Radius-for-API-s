@@ -1,0 +1,139 @@
+openapi: 3.0.3
+info:
+  title: Orders Service
+  version: 1.0.0
+  description: Creates and tracks customer orders. Called by billing, shipping and the web frontend.
+servers:
+  - url: https://orders.internal.example.com/v1
+
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders, optionally filtered by status
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+      responses:
+        '200':
+          description: A list of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+    post:
+      operationId: createOrder
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewOrder'
+      responses:
+        '201':
+          description: The created order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  /orders/{orderId}:
+    parameters:
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getOrder
+      summary: Get one order
+      responses:
+        '200':
+          description: The order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: Order not found
+
+  /orders/{orderId}/tracking:
+    parameters:
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getTracking
+      summary: Get shipment tracking for an order
+      responses:
+        '200':
+          description: Tracking details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tracking'
+
+components:
+  schemas:
+    OrderStatus:
+      type: string
+      enum: [pending, paid, shipped, cancelled]
+
+    Order:
+      type: object
+      required: [id, status, total, customer_name]
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        total:
+          type: number
+        currency:
+          type: string
+        discount_code:
+          type: string
+        customer_name:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+
+    LineItem:
+      type: object
+      required: [sku, quantity]
+      properties:
+        sku:
+          type: string
+        quantity:
+          type: integer
+
+    NewOrder:
+      type: object
+      required: [customer_name, items]
+      properties:
+        customer_name:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+
+    Tracking:
+      type: object
+      properties:
+        carrier:
+          type: string
+        tracking_number:
+          type: string
+        address:
+          type: string

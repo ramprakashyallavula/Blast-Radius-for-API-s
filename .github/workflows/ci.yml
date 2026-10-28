@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: |
+          ruff check src tests eval/run_eval.py
+          ruff format --check src tests eval/run_eval.py
+
+      - name: Test
+        run: pytest -v
+
+      - name: Accuracy
+        run: python eval/run_eval.py
+
+  demo:
+    name: Demo report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install .
+
+      # The demo is supposed to find breakages, so exit code 1 is expected here.
+      - name: Run BlastRadius on the example services
+        run: |
+          blastradius check examples/orders-service/openapi.v1.yaml \
+                            examples/orders-service/openapi.v2.yaml \
+                            --consumers-dir examples/consumers \
+                            --format markdown --output report.md || true
+          cat report.md >> "$GITHUB_STEP_SUMMARY"

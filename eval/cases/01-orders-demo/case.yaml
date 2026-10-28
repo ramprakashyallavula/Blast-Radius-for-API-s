@@ -1,0 +1,45 @@
+description: >
+  The README demo. Three services (Python requests, Python httpx, TypeScript
+  fetch/axios) against the Orders API v1 -> v2.
+
+base: ../../../examples/orders-service/openapi.v1.yaml
+head: ../../../examples/orders-service/openapi.v2.yaml
+consumers_dir: ../../../examples/consumers
+
+# Ground truth, labeled by hand: every call site that really fails against the new API.
+# Anything BlastRadius flags that isn't listed here is a false positive.
+breaks:
+  - consumer: billing-service
+    location: billing/invoices.py:11
+    endpoint: GET /orders/{orderId}
+    field: total
+    why: does arithmetic on order["total"], which is now a string
+
+  - consumer: billing-service
+    location: billing/invoices.py:11
+    endpoint: GET /orders/{orderId}
+    field: discount_code
+    why: reads order.get("discount_code"); always None now, so discounts silently vanish
+
+  - consumer: shipping-service
+    location: shipping/orders_client.py:11
+    endpoint: GET /orders/{orderId}/tracking
+    why: the endpoint no longer exists (404)
+
+  - consumer: web-frontend
+    location: src/api/orders.ts:12
+    endpoint: GET /orders/{orderId}
+    field: customer_name
+    why: shows order.customer_name, now undefined
+
+  - consumer: web-frontend
+    location: src/api/orders.ts:12
+    endpoint: GET /orders/{orderId}
+    field: status
+    why: statusBadge() throws on any status it doesn't know, including on_hold
+
+  - consumer: web-frontend
+    location: src/api/orders.ts:23
+    endpoint: POST /orders
+    field: currency
+    why: never sends currency, which is now required (400)
