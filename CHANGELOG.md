@@ -4,7 +4,7 @@ All notable changes to this project. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-10-28
 
 ### Fixed
 - Breaking changes that used to be reported as "no changes": fields removed or changed
@@ -30,6 +30,8 @@ All notable changes to this project. The format is based on
   passed through a git credential helper instead of the clone URL.
 - `blastradius export module:app` for FastAPI apps.
 - Web playground: FastAPI backend (`blastradius.server`) and React front end (`web/`).
+- Playground results view: a verdict, per-consumer stats, by-consumer and by-change views,
+  filters, and Markdown/JSON export.
 - Evaluation set grown to 5 cases and 21 labeled breaking call sites.
 - MIT license, package metadata, `docs/ARCHITECTURE.md`, `docs/SCHEMA_SUPPORT.md`.
 
@@ -39,5 +41,5 @@ First version: OpenAPI diff engine, consumer scanner for Python and JS/TS, impac
 analysis, CLI with terminal/Markdown/JSON reports, and a GitHub Action that comments on
 pull requests.
 
-[0.2.0]: https://github.com/ramprakashyallavula/Blast-Radius-for-API-s/compare/d6197cf...HEAD
-[0.1.0]: https://github.com/ramprakashyallavula/Blast-Radius-for-API-s/commit/d6197cf
+[0.2.0]: https://github.com/ramprakashyallavula/Blast-Radius-for-API-s/compare/35c4836...v0.2.0
+[0.1.0]: https://github.com/ramprakashyallavula/Blast-Radius-for-API-s/commit/35c4836
