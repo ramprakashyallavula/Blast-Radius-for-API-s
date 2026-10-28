@@ -1,0 +1,34 @@
+description: >
+  A oneOf response (Card | Bank), a path parameter that changes from an integer to a
+  UUID string, and a query enum that drops a value. Python requests and axios.
+
+base: base.yaml
+head: head.yaml
+consumers_dir: consumers
+
+breaks:
+  - consumer: ledger
+    location: ledger.py:7
+    endpoint: GET /payments/{paymentId}
+    field: paymentId
+    why: passes an integer id; the endpoint now expects a UUID string
+
+  - consumer: ledger
+    location: ledger.py:7
+    endpoint: GET /payments/{paymentId}
+    field: bank_name
+    why: returns p["bank_name"] for bank payments, which no longer have it
+
+  - consumer: ledger
+    location: ledger.py:15
+    endpoint: GET /payments
+    field: status
+    why: filters by status=failed, which is no longer accepted
+
+  - consumer: dashboard
+    location: payments.ts:4
+    endpoint: GET /payments/{paymentId}
+    field: paymentId
+    why: passes a numeric id; the endpoint now expects a UUID string
+
+# Not a break: dashboard payments.ts:9 filters by status=settled, which is still allowed.

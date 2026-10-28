@@ -31,6 +31,12 @@ inputs:
     description: When to fail the check. impacted (a consumer will break), breaking, or never.
     required: false
     default: impacted
+  fail-on-clone-error:
+    description: >
+      Fail the check if a consumer-repos repository can't be cloned (true/false).
+      Leaving a consumer out silently could hide the breakage you're checking for.
+    required: false
+    default: "true"
   comment:
     description: Post the report as a pull-request comment (true/false).
     required: false
@@ -48,6 +54,9 @@ outputs:
   exit-code:
     description: 0 = OK, 1 = the fail-on condition was met, 2 = bad input.
     value: ${{ steps.run.outputs.exit-code }}
+# Permissions the calling job needs:
+#   contents: read          to check out the code
+#   pull-requests: write    to post the comment (skipped automatically on fork PRs)
 
 runs:
   using: composite
@@ -58,7 +67,7 @@ runs:
 
     - name: Install BlastRadius
       shell: bash
-      run: pip install --quiet "${{ github.action_path }}"
+      run: pip install --quiet --disable-pip-version-check "${{ github.action_path }}"
 
     - name: Check API changes
       id: run
@@ -71,7 +80,9 @@ runs:
         CONSUMER_REPOS: ${{ inputs.consumer-repos }}
         CONSUMER_TOKEN: ${{ inputs.consumer-token }}
         FAIL_ON: ${{ inputs.fail-on }}
+        FAIL_ON_CLONE_ERROR: ${{ inputs.fail-on-clone-error }}
         COMMENT: ${{ inputs.comment }}
         BASE_REF: ${{ github.base_ref }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         GH_TOKEN: ${{ inputs.github-token }}

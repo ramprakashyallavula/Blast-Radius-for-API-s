@@ -1,0 +1,40 @@
+openapi: 3.1.0
+info: {title: Users, version: 2.0.0}
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, locale]
+              properties: {email: {type: string}, name: {type: string}, locale: {type: string}}
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+  /users/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getUser
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+components:
+  schemas:
+    User:
+      type: object
+      required: [id, email, name]
+      properties:
+        id: {type: string}
+        email: {type: string}
+        name: {type: string}

@@ -24,6 +24,11 @@ def normalize_path(path: str) -> str:
     return _PATH_PARAM.sub("{}", path)
 
 
+# Marks a schema that _expand built by merging the branches of a real anyOf/oneOf.
+# Its value is the number of non-null branches.
+UNION_VARIANTS = "x-blastradius-union-variants"
+
+
 @dataclass(frozen=True)
 class FieldInfo:
     """What we know about one field after flattening, e.g. `items[].sku`."""
@@ -31,6 +36,20 @@ class FieldInfo:
     type: str | None  # "string", "integer", "string(date-time)", ... None if unspecified
     required: bool  # required within its parent object
     enum: tuple | None = None  # allowed values, if restricted
+    nullable: bool = False  # may be null (nullable: true, type: [X, "null"], anyOf [X, null])
+    variants: int | None = None  # for a real anyOf/oneOf: how many non-null branches
+    # True if the field sits inside a real anyOf/oneOf branch: whether a given
+    # response or request uses that branch can't be known statically.
+    in_union: bool = False
+
+
+def _is_null_schema(schema: Any) -> bool:
+    return isinstance(schema, dict) and schema.get("type") == "null"
+
+
+def _is_nullable(schema: dict) -> bool:
+    t = schema.get("type")
+    return schema.get("nullable") is True or (isinstance(t, list) and "null" in t)
 
 
 def _base_type(schema: dict) -> str | None:
@@ -64,6 +83,7 @@ class Operation:
     params: dict[tuple[str, str], dict] = field(default_factory=dict)  # (in, name) -> parameter
     request_body: dict | None = None
     responses: dict[str, dict] = field(default_factory=dict)  # status code -> response
+    operation_id: str | None = None  # used to match generated-client calls like getOrder()
 
     @property
     def key(self) -> tuple[str, str]:
@@ -152,7 +172,11 @@ class Spec:
         while isinstance(node, dict) and "$ref" in node:
             ref = node["$ref"]
             if not isinstance(ref, str) or not ref.startswith("#/"):
-                raise SpecError(f"{self.source}: external $ref not supported yet: {ref}")
+                raise SpecError(
+                    f"{self.source}: external $ref not supported yet: {ref}. Bundle the "
+                    "spec into one file first, e.g. "
+                    "`npx @redocly/cli bundle openapi.yaml -o bundled.yaml`"
+                )
             if ref in seen:
                 raise SpecError(f"{self.source}: circular $ref: {ref}")
             seen.add(ref)
@@ -192,6 +216,7 @@ class Spec:
                         str(code): self.resolve(resp)
                         for code, resp in (raw.get("responses") or {}).items()
                     },
+                    operation_id=raw.get("operationId"),
                 )
                 ops[op.key] = op
         return ops
@@ -218,6 +243,15 @@ class Spec:
     def request_schema(self, op: Operation) -> Any:
         return self.json_schema(op.request_body)
 
+    @staticmethod
+    def media_types(holder: dict | None) -> set[str]:
+        """Content types a requestBody or response offers, e.g. {"application/json"}."""
+        return set((holder or {}).get("content") or {})
+
+    @staticmethod
+    def success_codes(op: Operation) -> list[str]:
+        return sorted(code for code in op.responses if code.startswith("2"))
+
     def success_schema(self, op: Operation) -> Any:
         """Schema of the first 2xx response with JSON content: what a happy-path client reads."""
         for code in sorted(op.responses):
@@ -228,7 +262,12 @@ class Spec:
         return None
 
     def flatten(
-        self, schema: Any, prefix: str = "", required: bool = True, _stack: tuple = ()
+        self,
+        schema: Any,
+        prefix: str = "",
+        required: bool = True,
+        _stack: tuple = (),
+        _in_union: bool = False,
     ) -> dict[str, FieldInfo]:
         """Turn a nested schema into {field path: FieldInfo}.
 
@@ -241,24 +280,42 @@ class Spec:
         if expanded is None:
             # A schema that contains itself (e.g. a Category with child Categories).
             # Record the field but stop descending, or we'd recurse forever.
-            return {prefix: FieldInfo("object", required)} if prefix else {}
+            info = FieldInfo("object", required, in_union=_in_union)
+            return {prefix: info} if prefix else {}
 
+        variants = expanded.get(UNION_VARIANTS)
         out: dict[str, FieldInfo] = {}
         if prefix:
             enum = expanded.get("enum")
             out[prefix] = FieldInfo(
-                schema_type(expanded), required, tuple(enum) if isinstance(enum, list) else None
+                schema_type(expanded),
+                required,
+                tuple(enum) if isinstance(enum, list) else None,
+                nullable=_is_nullable(expanded),
+                variants=variants,
+                in_union=_in_union,
             )
 
-        base = _base_type(expanded)
-        if base == "array":
-            out.update(self.flatten(expanded.get("items"), f"{prefix}[]", True, stack))
-        elif base == "object":
+        # Everything below a real union belongs to some branch, not necessarily all.
+        children_in_union = _in_union or variants is not None
+        kinds = set((_base_type(expanded) or "").split("|"))
+        if "array" in kinds and expanded.get("items") is not None:
+            out.update(
+                self.flatten(expanded["items"], f"{prefix}[]", True, stack, children_in_union)
+            )
+        if "object" in kinds or "properties" in expanded:
             required_names = set(expanded.get("required") or [])
             for name, sub in (expanded.get("properties") or {}).items():
                 child = f"{prefix}.{name}" if prefix else name
-                out.update(self.flatten(sub, child, name in required_names, stack))
+                out.update(
+                    self.flatten(sub, child, name in required_names, stack, children_in_union)
+                )
         return out
+
+    def union_variants(self, schema: Any) -> int | None:
+        """Branch count if the schema is a real anyOf/oneOf, else None."""
+        expanded, _ = self._expand(schema, ())
+        return (expanded or {}).get(UNION_VARIANTS)
 
     def _expand(self, schema: Any, stack: tuple) -> tuple[dict | None, tuple]:
         """Resolve `$ref`, merge `allOf`, and simplify `anyOf`/`oneOf`.
@@ -295,24 +352,68 @@ class Spec:
             schema = merged
 
         for key in ("anyOf", "oneOf"):
-            if key not in schema:
+            if not isinstance(schema.get(key), list):
                 continue
             rest = {k: v for k, v in schema.items() if k != key}
-            variants = [
-                v for v in schema[key] if not (isinstance(v, dict) and v.get("type") == "null")
-            ]
+            branches = schema[key]
+            variants = [v for v in branches if not _is_null_schema(v)]
+            if len(variants) < len(branches):
+                rest["nullable"] = True
             if len(variants) == 1:
-                # "X or null" is how FastAPI/Pydantic write Optional[X]: treat it as X.
+                # "X or null" is how FastAPI/Pydantic write Optional[X]: treat it as a
+                # nullable X, so changes inside X are still compared exactly.
                 sub, stack = self._expand(variants[0], stack)
                 if sub is None:
                     return None, stack
                 schema = {**rest, **sub}
-            else:
-                # A real union: compare it by the set of types it allows, e.g. "integer|string".
-                types = set()
-                for v in variants:
-                    sub, _ = self._expand(v, stack)
-                    types.add(schema_type(sub or {}) or "any")
-                schema = {**rest, "type": "|".join(sorted(types))}
+                if rest.get("nullable"):
+                    schema["nullable"] = True
+            elif variants:
+                schema = self._merge_union(rest, variants, stack)
             break
         return schema, stack
+
+    def _merge_union(self, rest: dict, variants: list, stack: tuple) -> dict:
+        """A superset view of a real union, so changes inside its branches stay visible.
+
+        The type lists every branch's type ("integer|string"). Properties from all
+        branches are merged; a property only some branches have becomes optional, and
+        one that branches define differently becomes a union of those definitions.
+        Fields below are flagged `in_union`, because which branch a payload uses
+        can't be known statically, so impact on consumers is uncertain.
+        """
+        expanded = []
+        for v in variants:
+            sub, _ = self._expand(v, stack)
+            expanded.append(sub if sub is not None else {"type": "object"})
+
+        merged = {
+            **rest,
+            "type": "|".join(sorted({schema_type(s) or "any" for s in expanded})),
+            UNION_VARIANTS: len(variants),
+        }
+        properties: dict[str, list] = {}
+        objects = [s for s in expanded if "properties" in s or _base_type(s) == "object"]
+        for s in objects:
+            for name, sub in (s.get("properties") or {}).items():
+                properties.setdefault(name, []).append(sub)
+        if properties:
+            merged["properties"] = {name: _one_or_union(subs) for name, subs in properties.items()}
+            # Required only if every branch is an object that requires it.
+            if len(objects) == len(expanded):
+                required = [set(s.get("required") or []) for s in objects]
+                merged["required"] = sorted(set.intersection(*required))
+            else:
+                merged["required"] = []
+        items = [s["items"] for s in expanded if s.get("items") is not None]
+        if items:
+            merged["items"] = _one_or_union(items)
+        return merged
+
+
+def _one_or_union(schemas: list) -> Any:
+    unique = []
+    for s in schemas:
+        if s not in unique:
+            unique.append(s)
+    return unique[0] if len(unique) == 1 else {"anyOf": unique}

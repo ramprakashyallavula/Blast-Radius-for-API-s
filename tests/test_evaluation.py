@@ -24,8 +24,8 @@ def test_accuracy_does_not_regress():
     results = run_all(CASES)
     strict, lenient = total(results, "strict"), total(results, "lenient")
 
-    assert len(results) >= 2
-    assert strict.precision >= 0.83
-    assert strict.recall >= 0.55
-    assert lenient.precision >= 0.87
-    assert lenient.recall >= 0.77
+    assert len(results) >= 5
+    assert strict.precision >= 0.99
+    assert strict.recall >= 0.57
+    assert lenient.precision >= 0.82
+    assert lenient.recall >= 0.90

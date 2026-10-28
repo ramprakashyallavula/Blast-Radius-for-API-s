@@ -167,3 +167,99 @@ def test_deleted_spec_fails(pr):
 
     assert result.returncode == 1
     assert "was deleted" in result.stdout
+
+
+# --- failure handling (regressions from the Action review) -----------------
+
+
+def test_base_branch_that_cant_be_fetched_fails_instead_of_passing(pr):
+    work, env, log, _ = pr
+
+    result = run(work, env, BASE_REF="no-such-branch")
+
+    # Used to exit 0 as if the spec were new, which would pass the check.
+    assert result.returncode == 2
+    assert "Couldn't fetch the base branch" in result.stdout
+    assert log.read_text() == ""
+
+
+def test_fork_pull_requests_skip_the_comment_but_still_report(pr):
+    work, env, log, tmp = pr
+
+    result = run(work, env, HEAD_REPO="someone/fork")
+
+    assert result.returncode == 1
+    assert "fork" in result.stdout
+    assert log.read_text() == ""
+    assert "BlastRadius report" in (tmp / "summary.md").read_text()
+
+
+def test_missing_consumer_folder_fails(pr):
+    work, env, _, _ = pr
+
+    result = run(work, env, CONSUMERS_DIR="", CONSUMERS="services/nope")
+
+    assert result.returncode == 2
+    assert "doesn't exist" in result.stdout
+
+
+@pytest.fixture
+def git_host(tmp_path):
+    """A folder of bare repositories that stands in for github.com."""
+    host = tmp_path / "host"
+    source = tmp_path / "billing-src"
+    shutil.copytree(EXAMPLES / "consumers" / "billing-service", source)
+    git(source, "init", "-q", "-b", "main")
+    git(source, "add", "-A")
+    git(source, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x")
+    (host / "acme").mkdir(parents=True)
+    git(tmp_path, "clone", "-q", "--bare", str(source), str(host / "acme" / "billing-service.git"))
+    return host.as_uri()
+
+
+def test_consumer_repositories_are_cloned_and_scanned(pr, git_host):
+    work, env, log, _ = pr
+
+    result = run(
+        work,
+        env,
+        CONSUMERS_DIR="",
+        CONSUMER_REPOS="acme/billing-service",
+        GIT_HOST=git_host,
+        CONSUMER_TOKEN="test-token-not-real",
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "billing-service" in log.read_text()
+    # The only place the token appears is GitHub's own masking command, which the
+    # runner hides; it never shows up in a URL or an error message.
+    output = (result.stdout + result.stderr).replace("::add-mask::test-token-not-real", "")
+    assert "test-token-not-real" not in output
+
+
+def test_a_failed_clone_fails_the_check_by_default(pr, git_host):
+    work, env, log, _ = pr
+
+    result = run(work, env, CONSUMER_REPOS="acme/missing", GIT_HOST=git_host)
+
+    assert result.returncode == 2
+    assert "Couldn't clone acme/missing" in result.stdout
+    assert log.read_text() == ""
+
+
+def test_a_failed_clone_can_be_allowed(pr, git_host):
+    work, env, _, _ = pr
+
+    result = run(
+        work, env, CONSUMER_REPOS="acme/missing", GIT_HOST=git_host, FAIL_ON_CLONE_ERROR="false"
+    )
+
+    assert result.returncode == 1  # the local consumers still break
+    assert "left out of the analysis" in result.stdout
+
+
+def test_the_token_is_never_put_in_a_clone_url():
+    script = SCRIPT.read_text()
+
+    assert "x-access-token:$" not in script
+    assert "credential.helper" in script

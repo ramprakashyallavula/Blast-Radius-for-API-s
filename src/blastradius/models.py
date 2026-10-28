@@ -21,7 +21,10 @@ class ChangeKind(str, Enum):
     PARAM_ADDED_OPTIONAL = "param_added_optional"
     PARAM_BECAME_REQUIRED = "param_became_required"
     PARAM_TYPE_CHANGED = "param_type_changed"
+    PARAM_ENUM_RESTRICTED = "param_enum_restricted"
     PARAM_REMOVED = "param_removed"
+    PATH_PARAM_TYPE_CHANGED = "path_param_type_changed"
+    PATH_PARAM_ENUM_RESTRICTED = "path_param_enum_restricted"
 
     REQUEST_BODY_BECAME_REQUIRED = "request_body_became_required"
     REQUEST_FIELD_ADDED_REQUIRED = "request_field_added_required"
@@ -29,6 +32,9 @@ class ChangeKind(str, Enum):
     REQUEST_FIELD_BECAME_REQUIRED = "request_field_became_required"
     REQUEST_FIELD_TYPE_CHANGED = "request_field_type_changed"
     REQUEST_ENUM_VALUE_REMOVED = "request_enum_value_removed"
+    REQUEST_FIELD_NO_LONGER_NULLABLE = "request_field_no_longer_nullable"
+    REQUEST_UNION_VARIANT_REMOVED = "request_union_variant_removed"
+    REQUEST_MEDIA_TYPE_REMOVED = "request_media_type_removed"
     REQUEST_FIELD_REMOVED = "request_field_removed"
 
     RESPONSE_FIELD_REMOVED = "response_field_removed"
@@ -36,7 +42,11 @@ class ChangeKind(str, Enum):
     RESPONSE_FIELD_TYPE_CHANGED = "response_field_type_changed"
     RESPONSE_FIELD_BECAME_OPTIONAL = "response_field_became_optional"
     RESPONSE_ENUM_VALUE_ADDED = "response_enum_value_added"
+    RESPONSE_FIELD_BECAME_NULLABLE = "response_field_became_nullable"
+    RESPONSE_UNION_VARIANT_ADDED = "response_union_variant_added"
+    RESPONSE_MEDIA_TYPE_REMOVED = "response_media_type_removed"
     RESPONSE_STATUS_REMOVED = "response_status_removed"
+    RESPONSE_STATUS_ADDED = "response_status_added"
 
 
 @dataclass
@@ -51,6 +61,9 @@ class Change:
     field: str | None = None  # field path (e.g. "items[].sku") or parameter name
     before: Any = None
     after: Any = None
+    # False when the change is inside a oneOf/anyOf branch: a consumer that uses the
+    # field may never receive (or send) that branch, so impact is at most "may break".
+    certain: bool = True
 
     @property
     def endpoint(self) -> str:
@@ -68,6 +81,12 @@ class CallSite:
     url: str  # normalized URL template, e.g. "/{}/orders/{}"
     snippet: str  # the source line, for reports
     context: str  # the call plus the code after it, used to see which fields it touches
+    # The code before the call in the same function (request payloads are often built there).
+    preamble: str = ""
+    function: str | None = None  # name of the function the call is in, if any
+    # If that function hands the response back to its callers: the code after each call
+    # to it in the same file, as (line, code). Used to follow fields read one level up.
+    callers: tuple[tuple[int, str], ...] = ()
 
     @property
     def location(self) -> str:

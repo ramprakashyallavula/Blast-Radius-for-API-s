@@ -47,14 +47,14 @@ def main() -> None:
 
     real = len(strict.true_positives) + len(strict.false_negatives)
     print(f"BlastRadius evaluation: {len(results)} cases, {real} labeled breaking call sites\n")
-    print(f"{'case':22} {'strict P':>9} {'strict R':>9} {'lenient P':>10} {'lenient R':>10}")
+    print(f"{'case':30} {'strict P':>9} {'strict R':>9} {'lenient P':>10} {'lenient R':>10}")
     for r in results:
         print(
-            f"{r.name:22} {pct(r.strict.precision):>9} {pct(r.strict.recall):>9} "
+            f"{r.name:30} {pct(r.strict.precision):>9} {pct(r.strict.recall):>9} "
             f"{pct(r.lenient.precision):>10} {pct(r.lenient.recall):>10}"
         )
     print(
-        f"{'TOTAL':22} {pct(strict.precision):>9} {pct(strict.recall):>9} "
+        f"{'TOTAL':30} {pct(strict.precision):>9} {pct(strict.recall):>9} "
         f"{pct(lenient.precision):>10} {pct(lenient.recall):>10}"
     )
     print("\nstrict = only 'will break' counts; lenient = 'will break' or 'may break' counts")

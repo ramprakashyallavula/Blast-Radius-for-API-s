@@ -1,14 +1,19 @@
 """Find the HTTP calls a consumer service makes, by scanning its source code.
 
-This version is pattern-based (regular expressions plus a small string tokenizer),
-which works across Python and JavaScript/TypeScript without a parser per language.
+This version is pattern-based (regular expressions plus a small tokenizer), which
+works across Python and JavaScript/TypeScript without a parser per language.
 It recognizes:
 
     requests.get(...), httpx.post(...), self.session.get(...), client.delete(...)
     axios.get(...), api.post(...), fetch(url, { method: "PUT" })
+    url = f"{BASE}/orders/{id}"; requests.get(url)          (URL in a variable)
+    requests.get(self._url("orders", id))                   (URL from a helper)
+    orders_api.get_order(id), ordersApi.getOrder(id)        (generated clients)
 
+Comments, docstrings and strings are ignored, so `# requests.get("/x")` is not a call.
 For each call it records the URL as a template ("/{}/orders/{}"), the HTTP method,
-and the code that follows the call, which later steps search for field usage.
+the code before and after the call in the same function, and, when the function
+returns the response, the code after each call to that function in the same file.
 """
 
 from __future__ import annotations
@@ -36,21 +41,55 @@ SKIP_DIRS = {
 # Only treat `<object>.get(...)` as an HTTP call if the object's name looks like an
 # HTTP client. Otherwise every `my_dict.get("key")` would count.
 CLIENT_HINTS = ("requests", "httpx", "session", "client", "http", "axios", "api")
+HTTP_VERBS = {"get", "post", "put", "patch", "delete"}
+
+# Generated-client calls are recorded with this URL prefix plus the method name, and
+# matched to an operation by its operationId (see matcher.py).
+OPERATION_PREFIX = "op:"
+# Method names on client objects that are never API operations.
+_NOT_OPERATIONS = {
+    "request",
+    "send",
+    "close",
+    "json",
+    "text",
+    "then",
+    "catch",
+    "finally",
+    "head",
+    "options",
+    "stream",
+    "build_request",
+    "raise_for_status",
+    "mount",
+    "create",
+}
 
 _METHOD_CALL = re.compile(
-    r"(?P<obj>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.(?P<method>get|post|put|patch|delete)\s*\("
+    r"(?P<obj>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.(?P<method>[A-Za-z_$][\w$]*)\s*\("
 )
 _FETCH_CALL = re.compile(r"(?<![\w$.])fetch\s*\(")
 _FETCH_METHOD = re.compile(r"""method\s*:\s*['"`](?P<method>[A-Za-z]+)['"`]""")
 
-# Where one function ends and the next begins. The context of a call stops here.
-_BOUNDARY = re.compile(
-    r"^\s*(?:async\s+)?def\s|^\s*class\s|^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b"
+# A line that starts a function. Its name is in one of the `name` groups.
+_FUNCTION = re.compile(
+    r"^(?P<indent>[ \t]*)(?:"
+    r"(?:async\s+)?def\s+(?P<py>\w+)"
+    r"|(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(?P<js>[\w$]+)"
+    r"|(?:export\s+)?(?:const|let|var)\s+(?P<arrow>[\w$]+)\s*(?::[^=]+)?="
+    r"\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*(?::[^=]+)?=>"
+    r"|(?:(?:public|private|protected|static|async)\s+)*(?P<method>(?!(?:if|for|while|switch|catch|return)\b)[\w$]+)"
+    r"\s*\([^)]*\)\s*(?::\s*[^{]+)?\{\s*$"
+    r")"
 )
+_CLASS = re.compile(r"^[ \t]*(?:export\s+)?(?:default\s+)?class\s")
 CONTEXT_LINES = 25
+PREAMBLE_LINES = 25
 
 _PLACEHOLDER = re.compile(r"\$?\{[^{}]*\}")  # f"{x}", `${x}`, "{}".format(...)
 _SCHEME_HOST = re.compile(r"^[a-zA-Z][\w+.-]*://[^/]*")
+_IDENTIFIER = re.compile(r"^[A-Za-z_$][\w$.]*$")
+_HELPER_CALL = re.compile(r"^(?P<name>[A-Za-z_$][\w$.]*)\s*\((?P<args>.*)\)$", re.DOTALL)
 
 
 def scan_consumer(root: str | Path, name: str | None = None) -> list[CallSite]:
@@ -76,50 +115,184 @@ def _source_files(root: Path) -> Iterator[Path]:
 
 def scan_text(text: str, consumer: str, file: str) -> list[CallSite]:
     """All HTTP call sites in one source file."""
+    python = file.endswith(".py")
+    code_only = _mask(text, python, strings=True)  # where to look for calls
+    no_comments = _mask(text, python, strings=False)  # what to read field usage from
     lines = text.splitlines()
+    clean = no_comments.splitlines()
     found: list[tuple[int, str, str]] = []  # (offset, method, url)
 
-    for m in _METHOD_CALL.finditer(text):
-        client = m.group("obj").rsplit(".", 1)[-1].lower()
-        if not any(hint in client for hint in CLIENT_HINTS):
+    for m in _METHOD_CALL.finditer(code_only):
+        obj, name = m.group("obj"), m.group("method")
+        args = _call_args(text, m.end() - 1)
+        if args is None:
             continue
-        args = _call_args(text, m.end() - 1)
-        url = url_template(_first_arg(args)) if args is not None else None
-        if url:
-            found.append((m.start(), m.group("method").upper(), url))
+        line = text.count("\n", 0, m.start())
+        if name in HTTP_VERBS:
+            if not any(hint in obj.rsplit(".", 1)[-1].lower() for hint in CLIENT_HINTS):
+                continue
+            url = _resolve_url(_first_arg(args), clean, line)
+            if url:
+                found.append((m.start(), name.upper(), url))
+        elif _looks_like_generated_client(obj, name):
+            found.append((m.start(), "*", OPERATION_PREFIX + name))
 
-    for m in _FETCH_CALL.finditer(text):
+    for m in _FETCH_CALL.finditer(code_only):
         args = _call_args(text, m.end() - 1)
-        url = url_template(_first_arg(args)) if args is not None else None
+        if args is None:
+            continue
+        url = _resolve_url(_first_arg(args), clean, text.count("\n", 0, m.start()))
         if url:
             method = _FETCH_METHOD.search(args)
             found.append((m.start(), method.group("method").upper() if method else "GET", url))
 
     sites = []
     for offset, method, url in sorted(found):
-        line = text.count("\n", 0, offset) + 1
+        index = text.count("\n", 0, offset)  # 0-based line
+        function, start = _enclosing_function(clean, index)
+        context = _context(clean, index)
         sites.append(
             CallSite(
                 consumer=consumer,
                 file=file,
-                line=line,
+                line=index + 1,
                 method=method,
                 url=url,
-                snippet=lines[line - 1].strip(),
-                context=_context(lines, line),
+                snippet=lines[index].strip(),
+                context=context,
+                preamble="\n".join(clean[max(start, index - PREAMBLE_LINES) : index]),
+                function=function,
+                callers=_callers(clean, function, start) if function else (),
             )
         )
     return sites
 
 
-def _context(lines: list[str], line: int) -> str:
+def _looks_like_generated_client(obj: str, name: str) -> bool:
+    """`orders_api.get_order(...)`, `ordersApi.getOrder(...)`, `client.orders.list(...)`."""
+    owner = obj.lower()
+    return (
+        any(hint in owner for hint in ("api", "client", "sdk", "service"))
+        and name not in _NOT_OPERATIONS
+        and not name.startswith("_")
+        and len(name) > 2
+    )
+
+
+# --- where the URL comes from ------------------------------------------------
+
+
+def _resolve_url(expr: str, lines: list[str], index: int) -> str | None:
+    """A URL template for the first argument of a call, if it can be worked out."""
+    expr = expr.strip()
+    url = url_template(expr)
+    if url:
+        return url
+    if _IDENTIFIER.match(expr):
+        # `requests.get(url)`: look for the assignment above, in the function or module.
+        assigned = re.compile(
+            rf"^\s*(?:(?:const|let|var)\s+)?(?:self\.|this\.)?{re.escape(expr.split('.')[-1])}"
+            r"\s*(?::[^=]+)?=(?!=)\s*(?P<value>.+?)\s*;?\s*$"
+        )
+        for i in range(index - 1, -1, -1):
+            match = assigned.match(lines[i])
+            if match:
+                return url_template(match.group("value"))
+        return None
+    helper = _HELPER_CALL.match(expr)
+    if helper and re.search(r"url|path|join|endpoint|route", helper.group("name"), re.I):
+        # `self._url("orders", order_id)` or `urljoin(BASE, "orders/")`: treat the
+        # arguments as path segments.
+        segments = [
+            url_template(a) or _literal(a) or "{}" for a in _split_args(helper.group("args"))
+        ]
+        return (
+            url_template('"' + "/".join(s.strip("/") for s in segments) + '"') if segments else None
+        )
+    return None
+
+
+def _literal(arg: str) -> str | None:
+    arg = arg.strip()
+    if len(arg) >= 2 and arg[0] == arg[-1] and arg[0] in "'\"`":
+        return arg[1:-1]
+    return None
+
+
+# --- comments, functions and context ---------------------------------------
+
+
+def _mask(text: str, python: bool, strings: bool) -> str:
+    """Blank out comments (and, if `strings`, string literals) keeping offsets and lines.
+
+    Docstrings and other triple-quoted strings are always blanked: they're prose.
+    """
+    out = list(text)
+    i, n = 0, len(text)
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, b):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        c = text[i]
+        if (python and c == "#") or (not python and text.startswith("//", i)):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            blank(i, end)
+            i = end
+        elif not python and text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            blank(i, end)
+            i = end
+        elif python and text.startswith(('"""', "'''"), i):
+            end = text.find(text[i : i + 3], i + 3)
+            end = n if end < 0 else end + 3
+            blank(i, end)
+            i = end
+        elif c in "'\"`":
+            end = _skip_string(text, i)
+            if strings:
+                blank(i, end)
+            i = end
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _enclosing_function(lines: list[str], index: int) -> tuple[str | None, int]:
+    """(name, first line) of the function that line `index` is in; (None, 0) at top level."""
+    indent = len(lines[index]) - len(lines[index].lstrip())
+    for i in range(index, -1, -1):
+        match = _FUNCTION.match(lines[i])
+        if match and (i == index or len(match.group("indent")) < indent):
+            if i == index:
+                continue  # the call is on the function line itself (one-liner)
+            name = next(g for g in ("py", "js", "arrow", "method") if match.group(g))
+            return match.group(name), i
+    return None, 0
+
+
+def _context(lines: list[str], index: int) -> str:
     """The call's line plus following lines, up to the next function or class."""
-    end = min(len(lines), line - 1 + CONTEXT_LINES)
-    for i in range(line, end):
-        if _BOUNDARY.match(lines[i]):
+    end = min(len(lines), index + CONTEXT_LINES)
+    for i in range(index + 1, end):
+        if _FUNCTION.match(lines[i]) or _CLASS.match(lines[i]):
             end = i
             break
-    return "\n".join(lines[line - 1 : end])
+    return "\n".join(lines[index:end])
+
+
+def _callers(lines: list[str], function: str, start: int) -> tuple[tuple[int, str], ...]:
+    """Code after each call to `function` elsewhere in the file: where its result is used."""
+    call = re.compile(rf"(?<![\w$]){re.escape(function)}\s*\(")
+    found = []
+    for i, line in enumerate(lines):
+        if i != start and call.search(line) and not _FUNCTION.match(line):
+            found.append((i + 1, _context(lines, i)))
+    return tuple(found)
 
 
 # --- reading arguments out of source text ----------------------------------
@@ -145,9 +318,13 @@ def _call_args(text: str, open_paren: int) -> str | None:
 
 def _first_arg(args: str | None) -> str:
     """Everything before the first top-level comma."""
-    if not args:
-        return ""
-    depth, i = 0, 0
+    parts = _split_args(args or "")
+    return parts[0] if parts else ""
+
+
+def _split_args(args: str) -> list[str]:
+    """Split call arguments on top-level commas."""
+    parts, depth, start, i = [], 0, 0, 0
     while i < len(args):
         c = args[i]
         if c in "'\"`":
@@ -158,9 +335,12 @@ def _first_arg(args: str | None) -> str:
         elif c in ")]}":
             depth -= 1
         elif c == "," and depth == 0:
-            return args[:i]
+            parts.append(args[start:i])
+            start = i + 1
         i += 1
-    return args
+    if args[start:].strip():
+        parts.append(args[start:])
+    return parts
 
 
 def _skip_string(text: str, start: int) -> int:

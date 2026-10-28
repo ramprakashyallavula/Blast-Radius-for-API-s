@@ -35,6 +35,30 @@ jobs:
       - name: Accuracy
         run: python eval/run_eval.py
 
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"   # the oldest supported version
+
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+
+      - name: Install the wheel in a clean environment and run it
+        run: |
+          python -m venv /tmp/check
+          /tmp/check/bin/pip install dist/*.whl
+          /tmp/check/bin/blastradius --version
+          # Exit code 1 = breaking changes found, which is the expected result here.
+          /tmp/check/bin/blastradius diff examples/orders-service/openapi.v1.yaml \
+            examples/orders-service/openapi.v2.yaml --all > /dev/null || [ $? -eq 1 ]
+
   web:
     name: Web (frontend)
     runs-on: ubuntu-latest
@@ -78,11 +102,20 @@ jobs:
 
       - run: pip install .
 
-      # The demo is supposed to find breakages, so exit code 1 is expected here.
+      # The demo is supposed to find breakages, so exit code 1 is the expected
+      # result. Anything else (0: it missed them, 2: bad input) fails the job.
       - name: Run BlastRadius on the example services
         run: |
+          set +e
           blastradius check examples/orders-service/openapi.v1.yaml \
                             examples/orders-service/openapi.v2.yaml \
                             --consumers-dir examples/consumers \
-                            --format markdown --output report.md || true
+                            --format markdown --output report.md
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "::error::Expected exit code 1 (consumers break), got $code"
+            exit 1
+          fi
+          grep -q "3 consumers will break" report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
