@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from blastradius import __version__
 from blastradius.cli import app
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -131,4 +132,4 @@ def test_scan():
 
 
 def test_version():
-    assert run("--version").output.strip() == "blastradius 0.1.0"
+    assert run("--version").output.strip() == f"blastradius {__version__}"
