@@ -15,13 +15,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff~=0.17.0", "fastapi>=0.110"]
+# The web playground's API: uvicorn blastradius.server:app
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+dev = ["pytest>=8.0", "ruff~=0.17.0", "fastapi>=0.110", "httpx2>=2.16"]
 
 [project.scripts]
 blastradius = "blastradius.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/blastradius"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# The demo the web API serves at GET /demo.
+"examples" = "blastradius/examples"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
