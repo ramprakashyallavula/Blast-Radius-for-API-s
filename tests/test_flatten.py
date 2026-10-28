@@ -141,3 +141,32 @@ def test_success_schema_skips_error_and_empty_responses():
     op = spec.operations()[("DELETE", "/x")]
 
     assert spec.success_schema(op) is None
+
+
+def test_any_of_with_null_is_treated_as_the_type():
+    spec = make_spec({"Address": {"type": "object", "properties": {"city": {"type": "string"}}}})
+    schema = {
+        "properties": {
+            "nickname": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "address": {"anyOf": [{"$ref": "#/components/schemas/Address"}, {"type": "null"}]},
+        }
+    }
+
+    fields = spec.flatten(schema)
+
+    assert fields["nickname"].type == "string"
+    assert fields["address.city"].type == "string"
+
+
+def test_real_unions_are_compared_by_their_types():
+    spec = make_spec()
+
+    fields = spec.flatten(
+        {
+            "properties": {
+                "id": {"oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}
+            }
+        }
+    )
+
+    assert fields["id"].type == "integer|string"

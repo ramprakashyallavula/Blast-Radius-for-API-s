@@ -256,7 +256,10 @@ class Spec:
         return out
 
     def _expand(self, schema: Any, stack: tuple) -> tuple[dict | None, tuple]:
-        """Resolve a `$ref` and merge `allOf`. Returns (None, stack) on a recursive ref."""
+        """Resolve `$ref`, merge `allOf`, and simplify `anyOf`/`oneOf`.
+
+        Returns (None, stack) on a recursive ref.
+        """
         if not isinstance(schema, dict):
             return {}, stack
         if "$ref" in schema:
@@ -285,4 +288,26 @@ class Spec:
             merged["properties"] = properties
             merged["required"] = required
             schema = merged
+
+        for key in ("anyOf", "oneOf"):
+            if key not in schema:
+                continue
+            rest = {k: v for k, v in schema.items() if k != key}
+            variants = [
+                v for v in schema[key] if not (isinstance(v, dict) and v.get("type") == "null")
+            ]
+            if len(variants) == 1:
+                # "X or null" is how FastAPI/Pydantic write Optional[X]: treat it as X.
+                sub, stack = self._expand(variants[0], stack)
+                if sub is None:
+                    return None, stack
+                schema = {**rest, **sub}
+            else:
+                # A real union: compare it by the set of types it allows, e.g. "integer|string".
+                types = set()
+                for v in variants:
+                    sub, _ = self._expand(v, stack)
+                    types.add(schema_type(sub or {}) or "any")
+                schema = {**rest, "type": "|".join(sorted(types))}
+            break
         return schema, stack

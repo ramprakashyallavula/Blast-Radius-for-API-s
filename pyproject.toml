@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff~=0.17.0"]
+dev = ["pytest>=8.0", "ruff~=0.17.0", "fastapi>=0.110"]
 
 [project.scripts]
 blastradius = "blastradius.cli:app"

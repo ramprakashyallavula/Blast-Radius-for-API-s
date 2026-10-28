@@ -3,6 +3,7 @@
     blastradius diff  BASE HEAD                       what changed in the spec
     blastradius scan  -C consumers/                   what HTTP calls consumers make
     blastradius check BASE HEAD -C consumers/         who will break (the main command)
+    blastradius export myapp.main:app -o openapi.json export a FastAPI app's spec
 
 Exit codes (so CI can pass or fail a pull request):
     0  OK
@@ -12,6 +13,9 @@ Exit codes (so CI can pass or fail a pull request):
 
 from __future__ import annotations
 
+import importlib
+import json
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -101,7 +105,7 @@ def _emit(text: str, output: Path | None) -> None:
         print(text, end="")  # plain print: no Rich formatting in Markdown/JSON
     else:
         output.write_text(text, encoding="utf-8")
-        err.print(f"[dim]Report written to {escape(str(output))}[/]")
+        err.print(f"[dim]Written to {escape(str(output))}[/]")
 
 
 def _version(value: bool) -> None:
@@ -131,8 +135,6 @@ def diff(
     if fmt is Format.table:
         print_changes(changes, console, show_safe=show_all)
     elif fmt is Format.json:
-        import json
-
         print(json.dumps([change_to_dict(c) for c in changes], indent=2))
     else:
         raise _fail("diff supports --format table or json")
@@ -190,3 +192,31 @@ def check(
         fail_on is FailOn.breaking and analysis.breaking
     )
     raise typer.Exit(1 if failed else 0)
+
+
+@app.command()
+def export(
+    target: Annotated[
+        str, typer.Argument(help="The app object as module:variable, e.g. myapp.main:app")
+    ],
+    output: OutputOpt = None,
+) -> None:
+    """Export the OpenAPI spec of a FastAPI app (or any object with an .openapi() method)."""
+    module_name, _, attr = target.partition(":")
+    if not module_name or not attr:
+        raise _fail(f"expected module:variable, e.g. myapp.main:app (got {target!r})")
+
+    # Import from the current folder, the way `uvicorn myapp.main:app` does.
+    sys.path.insert(0, str(Path.cwd()))
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as e:  # any import error is the user's to fix
+        raise _fail(f"could not import {module_name}: {e}") from e
+
+    obj = getattr(module, attr, None)
+    if obj is None:
+        raise _fail(f"{module_name} has no variable named {attr!r}")
+    if not callable(getattr(obj, "openapi", None)):
+        raise _fail(f"{target} has no .openapi() method; is it a FastAPI app?")
+
+    _emit(json.dumps(obj.openapi(), indent=2) + "\n", output)

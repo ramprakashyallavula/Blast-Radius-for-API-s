@@ -87,6 +87,29 @@ This repository uses its own Action: see
 [`.github/workflows/blastradius.yml`](.github/workflows/blastradius.yml), which runs
 when [`examples/orders-service/openapi.yaml`](examples/orders-service/openapi.yaml) changes.
 
+## What it works with
+
+**APIs (the producer side):** anything described by an **OpenAPI 3.0 or 3.1** spec, so
+it works no matter which framework serves the API:
+
+| Framework | How to get the spec |
+|---|---|
+| **FastAPI** | `blastradius export myapp.main:app -o openapi.json` (or the app's `/openapi.json`) |
+| Django REST Framework | `drf-spectacular` |
+| Spring Boot | `springdoc-openapi` |
+| NestJS | `@nestjs/swagger` |
+| Express | `swagger-jsdoc`, or a hand-written spec |
+| ASP.NET Core | Swashbuckle |
+| Go | `swag`, `ogen`, or a hand-written spec |
+
+FastAPI/Pydantic specifics such as `Optional[X]` (written as `anyOf: [X, null]`) and
+`Literal[...]` enums are understood. Tip: commit the exported spec, so every pull request
+shows the API change and BlastRadius can compare it.
+
+**Consumers (the code that calls the API):** currently **Python** (`requests`, `httpx`,
+session/client objects) and **JavaScript/TypeScript** (`fetch`, `axios`). Java, Go and C#
+consumers, and generated API clients, are on the roadmap.
+
 ## Commands
 
 | Command | What it does |
@@ -94,6 +117,7 @@ when [`examples/orders-service/openapi.yaml`](examples/orders-service/openapi.ya
 | `blastradius check BASE HEAD -C DIR` | Who will break. The main command. |
 | `blastradius diff BASE HEAD [--all]` | What changed in the spec, classified breaking / warning / safe |
 | `blastradius scan -C DIR` | The HTTP calls found in consumer code |
+| `blastradius export MODULE:APP` | Export a FastAPI app's OpenAPI spec |
 
 Useful options for `check`:
 
