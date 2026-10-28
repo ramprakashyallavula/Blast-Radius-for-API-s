@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ramprakashyallavula/Blast-Radius-for-API-s@main
+      - uses: ramprakashyallavula/Blast-Radius-for-API-s@v0.2.0   # a release tag or commit SHA, not @main
         with:
           spec: api/openapi.yaml
           consumers-dir: services          # consumers in this repo (monorepo)
@@ -81,7 +81,18 @@ jobs:
 | `consumer-repos` | | Other repositories to scan (`owner/name`), one per line |
 | `consumer-token` | `github-token` | Token that can read `consumer-repos` (needed for private repos) |
 | `fail-on` | `impacted` | `impacted`, `breaking`, or `never` |
+| `fail-on-clone-error` | `true` | Fail if a `consumer-repos` repository can't be cloned, rather than silently leaving it out |
 | `comment` | `true` | Post the report as a PR comment (updated on each push, not duplicated) |
+
+Notes:
+- **Pin a version** (`@v0.2.0` or a full commit SHA). `@main` changes under you.
+- **Private consumer repos** need a token with read access (a fine-grained PAT or a GitHub
+  App token) in `consumer-token`. It's passed to git through a credential helper, never in a URL.
+- **Fork pull requests** get a read-only token and no secrets, so the report goes to the job
+  summary instead of a comment, and private consumer repos can't be cloned.
+- **Exit codes:** `0` OK or nothing to compare (spec unchanged, or new in this PR), `1` the
+  `fail-on` condition was met or the spec was deleted, `2` the check couldn't run (unreadable
+  spec, base branch not fetchable, clone failure). Read it from the `exit-code` output.
 
 This repository uses its own Action: see
 [`.github/workflows/blastradius.yml`](.github/workflows/blastradius.yml), which runs
