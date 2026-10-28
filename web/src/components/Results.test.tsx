@@ -12,6 +12,7 @@ function change(over: Partial<ChangeImpact>): ChangeImpact {
     path: "/orders/{id}",
     field: "total",
     message: "Response field `total` was removed",
+    certain: true,
     worst_impact: "will_break",
     impacts: [],
     ...over,
@@ -43,7 +44,7 @@ const RESULT: AnalyzeResponse = {
       impacts: [{ consumer: "shipping", file: "s.py", line: 7, impact: "unaffected", reason: "x", code: "" }],
     }),
   ],
-  safe_changes: [{ kind: "endpoint_added", severity: "safe", method: "POST", path: "/refunds", field: null, message: "New endpoint" }],
+  safe_changes: [{ kind: "endpoint_added", severity: "safe", method: "POST", path: "/refunds", field: null, message: "New endpoint", certain: true }],
   unmatched: [{ consumer: "web", file: "o.ts", line: 9, method: "POST", url: "/{}/cancel" }],
   markdown: "## 💥 BlastRadius report",
 };

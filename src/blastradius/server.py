@@ -81,6 +81,10 @@ class ChangeOut(BaseModel):
     message: str
     before: Any = None
     after: Any = None
+    certain: bool = Field(
+        description="False for a change inside a oneOf/anyOf branch: whether a consumer gets "
+        "or sends that branch can't be known, so its impact is at most may_break."
+    )
 
 
 class ImpactOut(BaseModel):

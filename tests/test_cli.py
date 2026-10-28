@@ -87,6 +87,7 @@ def test_check_json():
     first = data["changes"][0]
     assert first["worst_impact"] == "will_break"
     assert first["impacts"][0]["impact"] == "will_break"
+    assert all(c["certain"] is True for c in data["changes"] + data["safe_changes"])
 
 
 # --- errors ----------------------------------------------------------------

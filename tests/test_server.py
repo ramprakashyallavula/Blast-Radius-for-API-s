@@ -57,6 +57,7 @@ def test_demo_round_trip():
     assert {"consumer", "file", "line", "impact", "reason", "code"} <= set(first["impacts"][0])
     assert report["unmatched"][0]["url"] == "/{}/orders/{}/cancel"
     assert report["markdown"].startswith("## 💥 BlastRadius report")
+    assert first["certain"] is True
 
 
 def test_analyze_with_inline_consumer():
@@ -140,3 +141,44 @@ def test_cors_allows_browser_calls():
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] in ("*", "https://example.com")
+
+
+UNION = """
+openapi: 3.0.3
+paths:
+  /pay:
+    get:
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {type: object, properties: {kind: {type: string}, last4: {type: string}}}
+                  - {type: object, properties: {kind: {type: string}, iban: {type: string}}}
+"""
+
+
+def test_union_changes_are_marked_uncertain():
+    head = UNION.replace("last4: {type: string}", "last4: {type: integer}")
+    consumers = [
+        {
+            "name": "web",
+            "files": [
+                {
+                    "path": "pay.ts",
+                    "content": "const r = await fetch(`${API}/pay`);\n"
+                    "const p = (await r.json()).last4;",
+                }
+            ],
+        }
+    ]
+
+    report = client.post(
+        "/analyze", json={"base_spec": UNION, "head_spec": head, "consumers": consumers}
+    ).json()
+
+    [change] = report["changes"]
+    assert change["certain"] is False
+    assert change["worst_impact"] == "may_break"
+    assert "uncertain" in report["markdown"]

@@ -28,6 +28,8 @@ export interface Change {
   message: string;
   before?: unknown;
   after?: unknown;
+  /** False for a change inside a oneOf/anyOf branch: impact is at most "may break". */
+  certain: boolean;
 }
 
 export interface Impact {
