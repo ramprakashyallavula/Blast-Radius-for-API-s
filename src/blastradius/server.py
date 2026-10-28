@@ -1,6 +1,6 @@
 """HTTP API for the BlastRadius web playground.
 
-    uvicorn blastradius.server:app --reload       # then open http://127.0.0.1:8000/docs
+    uvicorn blastradius.server:app --port 8787 --reload   # docs: http://127.0.0.1:8787/docs
 
 Everything happens in memory: specs and consumer files arrive in the request body,
 nothing is written to disk, and nothing is stored after the response is sent.
