@@ -35,6 +35,30 @@ jobs:
       - name: Accuracy
         run: python eval/run_eval.py
 
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"   # the oldest supported version
+
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+
+      - name: Install the wheel in a clean environment and run it
+        run: |
+          python -m venv /tmp/check
+          /tmp/check/bin/pip install dist/*.whl
+          /tmp/check/bin/blastradius --version
+          # Exit code 1 = breaking changes found, which is the expected result here.
+          /tmp/check/bin/blastradius diff examples/orders-service/openapi.v1.yaml \
+            examples/orders-service/openapi.v2.yaml --all > /dev/null || [ $? -eq 1 ]
+
   web:
     name: Web (frontend)
     runs-on: ubuntu-latest
